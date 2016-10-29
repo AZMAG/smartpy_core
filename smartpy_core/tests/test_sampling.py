@@ -75,3 +75,19 @@ def test_sample2d_not_enough_alts():
     # then test with replacement -- this is fine
     sample = sample2d(alts.index.values, num_agents, sample_size, True)
     assert sample.shape == (num_agents, sample_size)
+
+
+def test_sample2d_all_alts():
+    num_agents = 3   # rows
+    num_alts = 3     # choiceset
+    sample_size = 3  # colums
+    alts = pd.Series(np.random.rand(num_alts))
+    sample = sample2d(alts.index.values, num_agents, sample_size)
+
+    res = np.array([
+        [0, 1, 2],
+        [0, 1, 2],
+        [0, 1, 2]
+    ])
+
+    assert (sample == res).all()

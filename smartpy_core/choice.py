@@ -28,7 +28,6 @@ def binary_choice(p, t=None):
     """
     if t is None:
         t = np.random.rand(len(p))
-        print t
     return p > t
 
 
@@ -81,27 +80,20 @@ def logit_binary_choice(coeff, data):
 
     Returns:
     --------
-    boolean pandas.Series
+    u - pandas.Series of utilities
+    p - pandas.Series of probabilities
+    c - pandas.Series of boolean choices
 
     """
     # get the design matrix
-    if lower('intercept') not in data.columns:
+    if 'intercept' not in data.columns:
         data['intercept'] = 1 # should I be copying this first?
     coeff_cols = list(coeff.index.values)
     model_design = dmatrix(data[coeff_cols], return_type='dataframe')
 
     # get utilties and probabilities
     u = np.exp(np.dot(model_design.values, coeff.values.T))
-    print u
     p = u / (1 + u)
-    print p
 
-    # make the choice
-    return binary_choice(p)
-
-
-def multiple_choice():
-    """
-
-    """
-    return
+    # make the choice and return the results
+    return u, p, binary_choice(p)
