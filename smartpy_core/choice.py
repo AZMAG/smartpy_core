@@ -142,14 +142,11 @@ def weighted_choice(agents, alternatives, w_col=None, cap_col=None):
 
             # normalize w/in group weights
             w_sums = broadcast(e.groupby('old_idx')[w_col].sum(), e['old_idx'])
-            print w_sums
             gtz = w_sums > 0
             e.loc[gtz, w_col] = e[w_col] / w_sums
 
             # make the choice
             probs = get_probs(e[w_col])
-            print probs
-            print e
             choice_idx = np.random.choice(
                 e['old_idx'].values, len(agents), p=probs.values, replace=False)
 
