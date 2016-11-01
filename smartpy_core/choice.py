@@ -140,13 +140,8 @@ def weighted_choice(agents, alternatives, w_col=None, cap_col=None):
             # get a row for each unit of capacity
             e = explode(alternatives[[w_col, cap_col]], cap_col, 'old_idx')
 
-            # normalize w/in group weights
-            w_sums = broadcast(e.groupby('old_idx')[w_col].sum(), e['old_idx'])
-            gtz = w_sums > 0
-            e.loc[gtz, w_col] = e[w_col] / w_sums
-
             # make the choice
-            probs = get_probs(e[w_col])
+            probs = get_probs(e[w_col] / e[cap_col])
             choice_idx = np.random.choice(
                 e['old_idx'].values, len(agents), p=probs.values, replace=False)
 

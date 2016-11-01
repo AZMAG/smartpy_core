@@ -133,7 +133,7 @@ def test_weighted_choice(agents, alts):
         123, weighted_choice,
         agents, alts, w_col='w', cap_col='c'
     )
-    expected_c = pd.Series([2, 0, 1])
+    expected_c = pd.Series([2, 1, 1])
     assert (c == expected_c).all()
 
 
