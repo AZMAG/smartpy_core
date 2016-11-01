@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 from patsy import dmatrix
 
-from .wrangling import broadcast
+from .wrangling import broadcast, explode
+from .sampling import get_probs
 
 
 def binary_choice(p, t=None):
@@ -87,7 +88,7 @@ def logit_binary_choice(coeff, data):
     """
     # get the design matrix
     if 'intercept' not in data.columns:
-        data['intercept'] = 1 # should I be copying this first?
+        data['intercept'] = 1  # should I be copying this first?
     coeff_cols = list(coeff.index.values)
     model_design = dmatrix(data[coeff_cols], return_type='dataframe')
 
@@ -97,3 +98,59 @@ def logit_binary_choice(coeff, data):
 
     # make the choice and return the results
     return u, p, binary_choice(p)
+
+
+def weighted_choice(agents, alternatives, w_col=None, cap_col=None):
+    """
+    Makes choices based on scaling weights.
+
+    Parameters:
+    -----------
+    agents: pandas.DataFrame or pandas.Series
+        Agents to make choices.
+    alternatives: pandas.DataFrame
+        Choice set of alternatives.
+    w_col: string, optional, default None.
+        Column to serve as weights for the choice set.
+    cap_col: string
+        Column to serve as capacities for the choice set.
+
+    Returns:
+    --------
+    pandas.Series of the chosen indexes, aligned to the agents.
+
+    """
+    if cap_col is None:
+        # unconstrained choice
+        if w_col is None:
+            probs = None
+        else:
+            probs = get_probs(alternatives[w_col]).values
+        choice_idx = np.random.choice(alternatives.index.values, len(agents), p=probs)
+    else:
+        # capcity limited choice
+        if w_col is None:
+            e = explode(alternatives[[cap_col]], cap_col, 'old_idx')
+            choice_idx = np.random.choice(e['old_idx'].values, len(agents), replace=False)
+        else:
+            # make sure we have enough
+            if len(agents) > alternatives[cap_col].sum():
+                raise ValueError('Not enough capacity for agents')
+
+            # get a row for each unit of capacity
+            e = explode(alternatives[[w_col, cap_col]], cap_col, 'old_idx')
+
+            # normalize w/in group weights
+            w_sums = broadcast(e.groupby('old_idx')[w_col].sum(), e['old_idx'])
+            print w_sums
+            gtz = w_sums > 0
+            e.loc[gtz, w_col] = e[w_col] / w_sums
+
+            # make the choice
+            probs = get_probs(e[w_col])
+            print probs
+            print e
+            choice_idx = np.random.choice(
+                e['old_idx'].values, len(agents), p=probs.values, replace=False)
+
+    return pd.Series(choice_idx, index=agents.index)

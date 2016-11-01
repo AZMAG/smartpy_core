@@ -113,6 +113,27 @@ def test_rename_columns_some(a_df):
     assert list(a_df.columns) == ['col1_blah', 'col2', 'col3']
 
 
+##################################
+# EXPLODE QUANTITIES / DO REPEATS
+##################################
+
+
+def test_explode():
+    df = pd.DataFrame(
+        {
+            'col1': [10, 20, 30, 40],
+            'units': [3, 2, 1, 0]
+        },
+        index=pd.Index(['z', 'y', 'x', 'w'])
+    )
+    e = explode(df, 'units', 'idx')
+
+    assert (e.columns == ['col1', 'units', 'idx']).all()
+    assert len(e) == 6
+    assert (e['idx'] == ['z', 'z', 'z', 'y', 'y', 'x']).all()
+    assert e.index.unique
+
+
 ######################
 # CATEGORIZE
 ######################

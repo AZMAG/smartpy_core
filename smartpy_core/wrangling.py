@@ -110,6 +110,33 @@ def rename_columns(df, prefix='', suffix='', cols=None):
         df.rename(columns=new_names, inplace=True)
 
 
+def explode(df, amount_col, index_col='index'):
+    """
+    Given a dataframe with an capacity column,
+    generate a single row for each available unit.
+    The new data frame has a unique index with the old
+    index preserved in the specified column.
+
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        Rows to explode.
+    amount_col: str
+        Column with amounts to explode/repeat.
+    index_col: str, optional, default 'index'
+        Name of column that will hold the previous
+        index.
+
+    """
+    candidates = df[df[amount_col] > 0]
+    repeat_idx = candidates.index.repeat(candidates[amount_col].astype(int))
+    exploded = candidates.reindex(repeat_idx)
+    exploded[index_col] = exploded.index.values
+    exploded.reset_index(drop=True, inplace=True)
+
+    return exploded
+
+
 def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None):
     """
     Returns simple 2-dimensional pivot table. Also takes care of the aggregation.
