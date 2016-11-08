@@ -84,7 +84,7 @@ def test_logit_binary_choice():
 
 
 ##########################
-# WEIGHTED MULTIPLE CHOICE
+# WEIGHTED CHOICE
 ##########################
 
 
@@ -140,3 +140,52 @@ def test_weighted_choice(agents, alts):
 def test_weighted_choice_notEnoughCap(agents, alts):
     with pytest.raises(ValueError):
         weighted_choice(agents, alts.loc[2], w_col='w', cap_col='c')
+
+
+#########################################
+# CHOICE WITH SAMPLING OF ALTERNATIVES
+#########################################
+
+
+def test_weighted_choice_with_sampling():
+    seed = 123
+    sample_size = 4
+
+    choosers = pd.DataFrame(
+        {
+            'agent_col1': [10, 20, 30]
+        },
+        index=pd.Index(list('cba'))
+    )
+
+    alternatives = pd.DataFrame(
+        {
+            'alt_col1': [100, 200, 300, 400, 500]
+        },
+        index=pd.Index(np.arange(5, 0, -1))
+    )
+
+    def prob_call(interaction_data, num_choosers, sample_size, factor):
+        # simple probabilities function that just uses the alt column as a weight
+        util = factor * interaction_data['alt_col1'].values.reshape(num_choosers, sample_size)
+        return util / util.sum(axis=1, keepdims=True)
+
+    # 1st test w/out verbosity
+    choices = seeded_call(
+        seed,
+        weighted_choice_with_sampling,
+        choosers, alternatives, prob_call, factor=1.0, sample_size=sample_size
+    )
+    assert (choices['alternative_id'] == [1, 4, 1]).all()
+
+    # now test w/ samples as well
+    choices, samples = seeded_call(
+        seed,
+        weighted_choice_with_sampling,
+        choosers, alternatives, prob_call, factor=1.0, sample_size=sample_size, verbose=True
+    )
+    assert (choices['alternative_id'] == [1, 4, 1]).all()
+    assert len(samples) == len(choosers) * sample_size
+    assert 'alternative_id' in samples.columns
+    assert 'chooser_id' in samples.columns
+    assert 'prob' in samples.columns
