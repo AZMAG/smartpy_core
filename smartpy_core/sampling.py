@@ -33,10 +33,11 @@ def get_probs(weights, drop_na=False):
     return probs
 
 
-def get_segmented_probs(df, w_col, segment_cols, drop_na=False):
+def get_segmented_probs(df, w_col, segment_cols):
     """
     Converts a series of weights into probabilities across multiple
-    segments.
+    segments. Null values are treated as 0s. Segments containing
+    all nulls and/or 0s will have equal probabilities.
 
     Parameters:
     -----------
@@ -45,10 +46,7 @@ def get_segmented_probs(df, w_col, segment_cols, drop_na=False):
     w_col: string
         Name of column containing weights.
     segment_cols: str, list of str, series, index, ...
-        Defines  segments to generate probabilties for.
-    drop_na: optional, defualt None
-        If provided, the data frame will have null values in the weights column
-        replaced with this value.
+        Defines segments to generate probabilties for.
 
     Returns:
     --------
@@ -56,17 +54,18 @@ def get_segmented_probs(df, w_col, segment_cols, drop_na=False):
 
     """
 
-    # get the weight series, handle nulls if needed
-    w = handle_nulls(df[w_col], drop_na)
+    # get probabilities
+    w_sums = broadcast(df.groupby(segment_cols)[w_col].sum(), df, segment_cols)
+    probs = df[w_col] / w_sums
 
-    # get the probabilities
-    w_sums = broadcast(w.groupby(df[segment_cols]).sum(), df, segment_cols)
-    probs = w / w_sums
+    # handle nulls
+    w_sums = handle_nulls(w_sums)
+    probs = handle_nulls(probs)
 
-    # handle cases where all weights are 0
+    # handle cases where all weights in a segment are 0
     z_sums = w_sums == 0
     if z_sums.any():
-        w_cnts = broadcast(df.groupby(segment_cols).size(), df[segment_cols])
+        w_cnts = broadcast(df.groupby(segment_cols).size(), df, segment_cols)
         probs[z_sums] = 1 / w_cnts[z_sums]
 
     return probs
@@ -110,6 +109,54 @@ def randomize_probs(p):
 
     """
     return np.power(np.random.rand(len(p)), 1.0 / p)
+
+
+def segmented_sample_no_replace(amounts, data, segment_cols, w_col=None):
+    """
+    Returns samples without replacement in a segmented manner. Use
+    the weights column to control probabilities.
+
+    Parameters:
+    -----------
+    amounts: pandas.Series
+        Amounts to sample. Should be indexed by the segment.
+    data: pandas.DataFrame
+        Data to sample from.
+    segment_cols: str or list of str
+        Columns defining segments on the data. Should
+        match the index of the amounts.
+    w_col: string, optional, default None
+        If provided, defines sampling weights. If None
+        the sample is random.
+
+
+    Returns:
+    --------
+    numpy.array of the indexes of the sampled rows.
+
+    """
+
+    if not isinstance(segment_cols, list):
+        segment_cols = [segment_cols]
+
+    # sort the data frame
+    if w_col is None:
+        # totally random
+        data = data[segment_cols].reindex(np.random.permutation(data.index))
+    else:
+        # apply weights to get randomized probabilities
+        probs = get_segmented_probs(data, w_col, segment_cols)
+        data = data[segment_cols].copy()
+        data['ran_p'] = randomize_probs(probs)
+        data.sort('ran_p', ascending=False, inplace=True)
+
+    # broadcast the amounts
+    amounts = broadcast(amounts, data, segment_cols)
+
+    # return the top n rows
+    cc = data.groupby(segment_cols).cumcount() + 1
+    sampled = cc <= amounts
+    return data[sampled].index.values
 
 
 def sample2d(arr, num_rows, num_cols, replace=False, max_iter=100):

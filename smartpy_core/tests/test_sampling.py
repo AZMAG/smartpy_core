@@ -19,11 +19,11 @@ def test_get_probs():
 
 def test_get_segmented_probs():
     df = pd.DataFrame({
-        'grp': ['a', 'a', 'a', 'b', 'b', 'c', 'c'],
-        'w': [1, 3, 6, 1, np.nan, 0, 0]
+        'grp': ['a', 'a', 'a', 'b', 'b', 'c', 'c', 'd', 'd'],
+        'w': [1, 3, 6, 1, np.nan, 0, 0, np.nan, np.nan]
     })
     p = get_segmented_probs(df, 'w', 'grp')
-    assert (p.values == [.1, .3, .6, 1, 0, 0.5, 0.5]).all()
+    assert (p.values == [.1, .3, .6, 1, 0, 0.5, 0.5, 0.5, 0.5]).all()
 
 
 def test_randomize_probs():
@@ -42,6 +42,34 @@ def test_randomize_probs():
     r = seeded_call(seed, get_r, len(p))
     res = np.power(r, 1.0 / p)
     assert (r_p.values == res).all()
+
+
+def test_segmented_sample_no_replace():
+    seed = 123
+
+    df = pd.DataFrame({
+        'grp': ['a', 'a', 'a', 'b', 'b', 'b'],
+        'w': [20, 30, 10, 50, 5, 15]
+    })
+
+    amounts = pd.Series([1, 2], index=pd.Index(['b', 'a']))
+
+    # 1st test random (i.e. no weights)
+    # permutation result with this seed should be
+    # array([1, 3, 4, 0, 2, 5], dtype=int64)
+    ran_sample = seeded_call(
+        seed,
+        segmented_sample_no_replace,
+        amounts, df, ['grp']
+    )
+    assert (ran_sample == [1, 3, 0]).all()
+
+    # test with weights
+    # randmized probs with this seed should be
+    # [0.337836,0.081876, 0.000136, 0.434470, 0.009958, 0.018062]
+    # so the sort order should be
+    # [2, 4, 5, 1, 0, 3]
+
 
 
 def test_sample2d():
