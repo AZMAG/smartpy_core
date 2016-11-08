@@ -60,16 +60,23 @@ def test_segmented_sample_no_replace():
     ran_sample = seeded_call(
         seed,
         segmented_sample_no_replace,
-        amounts, df, ['grp']
+        amounts, df, 'grp'
     )
     assert (ran_sample == [1, 3, 0]).all()
 
     # test with weights
+    # probs are
+    # [0.333333,0.500000,0.166667, 0.714286, 0.071429, 0.214286]
     # randmized probs with this seed should be
     # [0.337836,0.081876, 0.000136, 0.434470, 0.009958, 0.018062]
     # so the sort order should be
-    # [2, 4, 5, 1, 0, 3]
-
+    # [3, 0, 1, 5, 4, 2]
+    w_sample = seeded_call(
+        seed,
+        segmented_sample_no_replace,
+        amounts, df, ['grp'], 'w'
+    )
+    assert (w_sample == [3, 0, 1]).all()
 
 
 def test_sample2d():
