@@ -7,7 +7,7 @@ import pandas.io.sql as pd_sql
 import pyodbc
 
 
-def get_db_connection(server, db):
+def get_db_connection(server, db, driver='SQL Server'):
     """
     Utility method to get a database connection.
 
@@ -17,18 +17,20 @@ def get_db_connection(server, db):
         Name of the SQL Server instance.
     db: string:
         Name of the database.
+    driver: string, optional defualt SQL Server
+        Driver for connection.
 
     Returns:
     --------
     Connection
 
     """
-    conn_string = """DRIVER={SQL Server};
+    conn_string = """DRIVER={};
                      SERVER={};
                      DATABASE={};
                      Trusted_Connection=yes"""
 
-    return pyodbc.connect(conn_string.format(server, db))
+    return pyodbc.connect(conn_string.format(driver, server, db))
 
 
 # use this function to load a data frame from sql
