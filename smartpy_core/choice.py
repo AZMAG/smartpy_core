@@ -8,7 +8,7 @@ import pandas as pd
 from patsy import dmatrix
 
 from .wrangling import broadcast, explode
-from .sampling import get_probs, sample2d
+from .sampling import get_probs, get_segmented_probs, randomize_probs, sample2d
 
 
 def binary_choice(p, t=None):
@@ -155,18 +155,16 @@ def weighted_choice(agents, alternatives, w_col=None, cap_col=None, return_probs
         return choices
 
 
-def weighted_choice_with_sampling(choosers,
-                                  alternatives,
-                                  probs_callback,
-                                  sample_size=50,
-                                  verbose=False,
-                                  **prob_kwargs):
+def choice_with_sampling(choosers,
+                         alternatives,
+                         probs_callback,
+                         sample_size=50,
+                         sample_replace=True,
+                         verbose=False,
+                         **prob_kwargs):
     """
-    Performs a weighted choice while sampling alternatives. The
-    alternatives are NOT constrained, so multiple choosers
-    may choose the same alternative. See the
-    'capacity_weighted_choice_with_sampling' method for
-    alternatives with capacity constraints.
+    Performs a weighted choice while sampling alternatives. Supports
+    attributes on both the chooser and the alternatives.
 
     Parameters:
     -----------
@@ -185,8 +183,11 @@ def weighted_choice_with_sampling(choosers,
             - num_choosers
             - sample_size
             - additional keyword args (see **prob_kwargs)
-    sample_size: int
+    sample_size: int, optional, default 50
         Number of alternatives to sample for each agent.
+    sample_replace: bool, optional, default True
+        If True, sampled alternatives and choices can be shared across multiple choosers,
+        If False, this will generate a non-overlapping choiceset.
     verbose: bool, optional, default False
         If true, an additional data frame is returned containing
         the choice matrix. This has the columns:
@@ -210,10 +211,21 @@ def weighted_choice_with_sampling(choosers,
     num_choosers = len(choosers)
 
     # sample from the alternatives
-    # todo: add non-row replacement? for the last iteration?
-    if num_alts < sample_size:
-        sample_size = num_alts
-    sampled_alt_idx = sample2d(alternatives.index.values, num_choosers, sample_size).ravel()
+    if sample_replace:
+        # allow the same alternative to be sampled across agents
+        sample_size = min(sample_size, num_alts)
+        sampled_alt_idx = sample2d(alternatives.index.values, num_choosers, sample_size).ravel()
+    else:
+        # non-overlapping choice-set
+        if num_alts < num_choosers:
+            raise ValueError("Less alternatives than choosers!")
+        sample_size = min(sample_size, num_alts / num_choosers)
+        print sample_size
+        sampled_alt_idx = np.random.choice(
+            alternatives.index.values, sample_size * num_choosers, replace=False)
+
+        print sampled_alt_idx
+
     sampled_alts = alternatives.reindex(sampled_alt_idx)
 
     # link choosers w/ sampled alternatives
@@ -229,7 +241,7 @@ def weighted_choice_with_sampling(choosers,
         sample_size=sample_size,
         **prob_kwargs)
     assert probs.shape == (num_choosers, sample_size)
-    assert probs.sum() == num_choosers
+    assert round(probs.sum(), 0) == num_choosers
 
     # make choices for each agent
     cs = np.cumsum(probs, axis=1)
@@ -255,3 +267,120 @@ def weighted_choice_with_sampling(choosers,
         return curr_choices, curr_samples
     else:
         return curr_choices
+
+
+def capacity_choice_with_sampling(choosers,
+                                  alternatives,
+                                  cap_col,
+                                  probs_callback,
+                                  sample_size=50,
+                                  max_iterations=10,
+                                  verbose=False,
+                                  **prob_kwargs):
+    """
+
+    Performs a weighted choice while sampling alternatives. Supports
+    attributes on both the chooser and the alternatives. Choices
+    are constrained by the capacities of the alternatives.
+
+    Parameters:
+    -----------
+    choosers: pandas.DataFrame
+        Data frame of agents making choices.
+    alternatives: pandas.DataFrame
+        Data frame of alternatives to choose from.
+    cap_col: string
+        Column on the alternatives data frame to provide capacities.
+    probs_callback: function
+        - Function used to generate probabilities
+          from the sampled interaction data.
+        - Should return a numpy matrix with the shape
+          (number of choosers, sample size).
+        - The probabilities for each row must sum to 1.
+        - The following arguments will be passed in to the callback:
+            - interaction_data
+            - num_choosers
+            - sample_size
+            - additional keyword args (see **prob_kwargs)
+    sample_size: int, optional, default 50
+        Number of alternatives to sample for each agent.
+    max_iterations: integer, optional, default 10
+        Number of iterations to apply.
+    verbose: bool, optional, default False
+        If true, an additional data frame is returned containing
+        the choice matrix. This has the columns:
+            - chooser_id: index of the chooser
+            - alternative_id: index of the alternative
+            - prob: the probability
+        **** NOT IMPLEMENTED RIGHT NOW ******
+    **prob_kwargs:
+        Additional key word arguments to pass to the probabilities
+        callback.
+
+    Returns:
+    --------
+    choices: pandas.Series
+        Series of chosen alternative IDs, indexed to the agents.
+
+    capacity: pandas.Series
+        Series containing updated capacities after making choices. Indexed to alternatives.
+
+    """
+
+    # initialize the choice results w/ null values
+    choices = pd.Series(index=choosers.index)
+
+    # get alternative capacities
+    capacity = alternatives[cap_col].copy()
+
+    for i in range(1, max_iterations + 1):
+
+        print i
+
+        # filter out choosers who have already chosen
+        curr_choosers = choosers[choices.isnull()]
+        num_choosers = len(curr_choosers)
+        if num_choosers == 0:
+            break
+
+        # filter out unavailable alternatives
+        has_cap = capacity > 0
+        curr_cap = capacity[has_cap]
+        if len(curr_cap) == 0:
+            break
+        curr_alts = alternatives[has_cap]
+
+        # put sampling weight stuff here -- leave out for now.
+
+        # handle the last iteration a litle differently
+        sample_replace = True
+        if i == max_iterations:
+            cap_rep = curr_cap.index.repeat(curr_cap.astype(int))
+            curr_alts = curr_alts.reindex(cap_rep)
+            sample_replace = False
+
+        # get the current choices
+        curr_choices = choice_with_sampling(
+            curr_choosers,
+            curr_alts,
+            probs_callback,
+            sample_size,
+            sample_replace,
+            verbose,
+            **prob_kwargs
+        )
+
+        # handle choices chosen by multiple agents
+        # prefer agents with higher probabilities, we can think of this as an inverse choice
+        cap_reindex = broadcast(capacity, curr_choices['alternative_id'])
+        curr_choices['inv_prob'] = get_segmented_probs(curr_choices, 'prob', 'alternative_id')
+        curr_choices['r_inv_prob'] = randomize_probs(curr_choices['inv_prob'])
+        curr_choices.sort('r_inv_prob', ascending=False, inplace=True)
+        cc = curr_choices.groupby('alternative_id').cumcount() + 1
+        chosen = curr_choices['alternative_id'][cc <= cap_reindex]
+        choices.loc[chosen.index] = chosen
+
+        # update capacities
+        capacity -= chosen.value_counts().reindex(capacity.index).fillna(0)
+
+    return choices, capacity

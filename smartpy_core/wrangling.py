@@ -110,7 +110,7 @@ def rename_columns(df, prefix='', suffix='', cols=None):
         df.rename(columns=new_names, inplace=True)
 
 
-def explode(df, amount_col, index_col='index'):
+def explode(df, amount_col, index_col='index', keep_index=False):
     """
     Given a dataframe with an capacity column,
     generate a single row for each available unit.
@@ -126,13 +126,17 @@ def explode(df, amount_col, index_col='index'):
     index_col: str, optional, default 'index'
         Name of column that will hold the previous
         index.
-
+    keep_index: optional, defualt False
+        If True, the original index is preserved.
+        If False, the index is copied to a column.
     """
     candidates = df[df[amount_col] > 0]
     repeat_idx = candidates.index.repeat(candidates[amount_col].astype(int))
     exploded = candidates.reindex(repeat_idx)
-    exploded[index_col] = exploded.index.values
-    exploded.reset_index(drop=True, inplace=True)
+
+    if not keep_index:
+        exploded[index_col] = exploded.index.values
+        exploded.reset_index(drop=True, inplace=True)
 
     return exploded
 

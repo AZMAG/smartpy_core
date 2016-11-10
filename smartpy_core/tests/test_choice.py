@@ -146,34 +146,41 @@ def test_weighted_choice_notEnoughCap(agents, alts):
 # CHOICE WITH SAMPLING OF ALTERNATIVES
 #########################################
 
-
-def test_weighted_choice_with_sampling():
-    seed = 123
-    sample_size = 4
-
-    choosers = pd.DataFrame(
+@pytest.fixture()
+def choosers():
+    return pd.DataFrame(
         {
             'agent_col1': [10, 20, 30]
         },
         index=pd.Index(list('cba'))
     )
 
-    alternatives = pd.DataFrame(
+
+@pytest.fixture()
+def alternatives():
+    return pd.DataFrame(
         {
-            'alt_col1': [100, 200, 300, 400, 500]
+            'alt_col1': [100, 200, 300, 400, 500],
+            'cap': [2, 2, 0, 1, 1]
         },
-        index=pd.Index(np.arange(5, 0, -1))
+        index=pd.Index(np.arange(5, 0, -1,))
     )
 
-    def prob_call(interaction_data, num_choosers, sample_size, factor):
-        # simple probabilities function that just uses the alt column as a weight
-        util = factor * interaction_data['alt_col1'].values.reshape(num_choosers, sample_size)
-        return util / util.sum(axis=1, keepdims=True)
+
+def prob_call(interaction_data, num_choosers, sample_size, factor):
+    # simple probabilities function that just uses the alt column as a weight
+    util = factor * interaction_data['alt_col1'].values.reshape(num_choosers, sample_size)
+    return util / util.sum(axis=1, keepdims=True)
+
+
+def test_choice_with_sampling(choosers, alternatives):
+    seed = 123
+    sample_size = 4
 
     # 1st test w/out verbosity
     choices = seeded_call(
         seed,
-        weighted_choice_with_sampling,
+        choice_with_sampling,
         choosers, alternatives, prob_call, factor=1.0, sample_size=sample_size
     )
     assert (choices['alternative_id'] == [1, 4, 1]).all()
@@ -181,7 +188,7 @@ def test_weighted_choice_with_sampling():
     # now test w/ samples as well
     choices, samples = seeded_call(
         seed,
-        weighted_choice_with_sampling,
+        choice_with_sampling,
         choosers, alternatives, prob_call, factor=1.0, sample_size=sample_size, verbose=True
     )
     assert (choices['alternative_id'] == [1, 4, 1]).all()
@@ -189,3 +196,39 @@ def test_weighted_choice_with_sampling():
     assert 'alternative_id' in samples.columns
     assert 'chooser_id' in samples.columns
     assert 'prob' in samples.columns
+
+    # test without replacement
+    choices, samples = seeded_call(
+        seed,
+        choice_with_sampling,
+        choosers.head(2), alternatives, prob_call,
+        sample_size=2, verbose=True, factor=2.0, sample_replace=False
+    )
+    assert (choices['alternative_id'] == [2, 1]).all()
+    assert len(samples) == 4
+
+    # test without replacement, without enough alts
+    with pytest.raises(ValueError):
+        choices = choice_with_sampling(
+            choosers,
+            alternatives.head(2),
+            prob_call, sample_size=sample_size, factor=2.0, sample_replace=False
+        )
+
+
+def test_capacity_choice_with_sampling(choosers, alternatives):
+    seed = 123
+    sample_size = 4
+
+    choices, capacities = seeded_call(
+        seed,
+        capacity_choice_with_sampling,
+        choosers,
+        alternatives,
+        'cap',
+        prob_call,
+        sample_size,
+        factor=2.0
+    )
+    assert (choices == pd.Series([1, 5, 2], index=choosers.index)).all()
+    assert (capacities == pd.Series([1, 2, 0, 0, 0], index=alternatives.index)).all()
