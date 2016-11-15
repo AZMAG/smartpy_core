@@ -70,7 +70,7 @@ def logit_binary_choice(coeff, data):
     Parameters:
     -----------
     coeff: pandas.Series
-        Table containing coefficients. Index is the variable
+        Series containing coefficients. Index is the variable
         name, the value the coefficient.
     data: pandas.DataFrame
         Table containing data to choose from. Should have
@@ -102,7 +102,7 @@ def logit_binary_choice(coeff, data):
 
 def weighted_choice(agents, alternatives, w_col=None, cap_col=None, return_probs=False):
     """
-    Makes choices based on scaling weights.
+    Makes choices based on weights previously assinged to the alternatives.
 
     Parameters:
     -----------
@@ -153,6 +153,69 @@ def weighted_choice(agents, alternatives, w_col=None, cap_col=None, return_probs
         return choices, probs  # SCOTT, need to add a test for this
     else:
         return choices
+
+
+def get_interaction_data(choosers, alternatives, sample_size, sample_replace=True):
+    """
+    Returns an interaction dataset with attributes of both choosers and alternatives,
+    with the number of alternatives per chooser defined by a sample size.
+
+    choosers: pandas.DataFrame
+        Data frame of agents making choices.
+    alternatives: pandas.DataFrame
+        Data frame of alternatives to choose from.
+    sample_size: int, optional, default 50
+        Number of alternatives to sample for each agent.
+    sample_replace: bool, optional, default True
+        If True, sampled alternatives and choices can be shared across multiple choosers,
+        If False, this will generate a non-overlapping choiceset.
+
+    Returns:
+    --------
+    interaction_data: pandas.DataFrame
+        Data frame with 1 row for each chooser and sampled alternative. Index is a
+        multi-index with level 0 containing the chooser IDs and level 1 containing
+        the alternative IDs.
+    sample_size: int
+        Sample size used in the sample. This may be smaller than the provided sample
+        size if the number of alternatives is less than the desired sample size.
+
+    """
+    num_alts = len(alternatives)
+    num_choosers = len(choosers)
+
+    # sample from the alternatives
+    if sample_replace:
+        # allow the same alternative to be sampled across agents
+        sample_size = min(sample_size, num_alts)
+        sampled_alt_idx = sample2d(alternatives.index.values, num_choosers, sample_size).ravel()
+    else:
+        # non-overlapping choice-set
+        if num_alts < num_choosers:
+            raise ValueError("Less alternatives than choosers!")
+        sample_size = min(sample_size, num_alts / num_choosers)
+        sampled_alt_idx = np.random.choice(
+            alternatives.index.values, sample_size * num_choosers, replace=False)
+
+    # align samples to match choosers
+    sampled_alts = alternatives.reindex(sampled_alt_idx)
+    alt_idx_name = sampled_alts.index.name
+    if alt_idx_name is None:
+        alt_idx_name = 'alternative_id'
+        sampled_alts.index.name = alt_idx_name
+    sampled_alts.reset_index(inplace=True)
+
+    # link choosers w/ sampled alternatives
+    choosers_r = choosers.reindex(choosers.index.repeat(sample_size))
+    chooser_idx_name = choosers_r.index.name
+    if chooser_idx_name is None:
+        chooser_idx_name = 'chooser_id'
+        choosers_r.index.name = chooser_idx_name
+    sampled_alts.index = choosers_r.index
+    interaction_data = pd.concat([choosers_r, sampled_alts], axis=1)
+    interaction_data.set_index(alt_idx_name, append=True, inplace=True)
+
+    return interaction_data, sample_size
 
 
 def choice_with_sampling(choosers,
@@ -207,31 +270,20 @@ def choice_with_sampling(choosers,
     - optionally, data frame of all samples (see verbose parameter above)
 
     """
-    num_alts = len(alternatives)
     num_choosers = len(choosers)
 
-    # sample from the alternatives
-    if sample_replace:
-        # allow the same alternative to be sampled across agents
-        sample_size = min(sample_size, num_alts)
-        sampled_alt_idx = sample2d(alternatives.index.values, num_choosers, sample_size).ravel()
-    else:
-        # non-overlapping choice-set
-        if num_alts < num_choosers:
-            raise ValueError("Less alternatives than choosers!")
-        sample_size = min(sample_size, num_alts / num_choosers)
-        print sample_size
-        sampled_alt_idx = np.random.choice(
-            alternatives.index.values, sample_size * num_choosers, replace=False)
+    # get sampled interaction data
+    interaction_data, sample_size = get_interaction_data(
+        choosers, alternatives, sample_size, sample_replace)
+    chooser_idx = interaction_data.index.get_level_values(0).values
+    alt_idx = interaction_data.index.get_level_values(1).values
 
-        print sampled_alt_idx
+    print 'chooser idx:'
+    print chooser_idx
 
-    sampled_alts = alternatives.reindex(sampled_alt_idx)
-
-    # link choosers w/ sampled alternatives
-    choosers_r = choosers.reindex(choosers.index.repeat(sample_size))
-    sampled_alts.index = choosers_r.index
-    interaction_data = pd.concat([choosers_r, sampled_alts], axis=1)
+    print ''
+    print 'alt idx:'
+    print alt_idx
 
     # assign weights/probabiltities to the alternatives
     # the result should a 2d numpy array with dim num choosers (rows) X num alts (cols)
@@ -241,7 +293,7 @@ def choice_with_sampling(choosers,
         sample_size=sample_size,
         **prob_kwargs)
     assert probs.shape == (num_choosers, sample_size)
-    assert round(probs.sum(), 0) == num_choosers
+    assert round(probs.sum(), 0) == num_choosers  # fix this per Jacob's suggestion?
 
     # make choices for each agent
     cs = np.cumsum(probs, axis=1)
@@ -249,9 +301,13 @@ def choice_with_sampling(choosers,
     chosen_rel_idx = np.argmax(r < cs, axis=1)
     chosen_abs_idx = chosen_rel_idx + (np.arange(num_choosers) * sample_size)
 
+    print ''
+    print 'chosen abs idx:'
+    print chosen_abs_idx
+
     curr_choices = pd.DataFrame(
         {
-            'alternative_id': sampled_alt_idx[chosen_abs_idx],
+            'alternative_id': alt_idx[chosen_abs_idx],
             'prob': probs.ravel()[chosen_abs_idx],
         },
         index=pd.Index(choosers.index)
@@ -260,8 +316,8 @@ def choice_with_sampling(choosers,
     # return the results
     if verbose:
         curr_samples = pd.DataFrame({
-            'chooser_id': interaction_data.index.values,
-            'alternative_id': sampled_alt_idx,
+            'chooser_id': chooser_idx,
+            'alternative_id': alt_idx,
             'prob': probs.ravel()
         })
         return curr_choices, curr_samples
@@ -278,10 +334,8 @@ def capacity_choice_with_sampling(choosers,
                                   verbose=False,
                                   **prob_kwargs):
     """
-
-    Performs a weighted choice while sampling alternatives. Supports
-    attributes on both the chooser and the alternatives. Choices
-    are constrained by the capacities of the alternatives.
+    Performs a weighted choice while sampling alternatives and
+    respecting alternative capacities.
 
     Parameters:
     -----------

@@ -177,7 +177,7 @@ def sample2d(arr, num_rows, num_cols, replace=False, max_iter=100):
         If false, there will be no duplicates row-wise.
         In both cases, there can be column-level duplicates. If both
         row and column uniqueness is needed then use np.random.choice
-        with replacement and reshape.
+        without replacement and reshape.
     max_iter: int
         Maximum number of iterations to apply when eliminating row-level
         duplicates.

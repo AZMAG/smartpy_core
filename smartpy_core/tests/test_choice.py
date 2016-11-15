@@ -167,6 +167,38 @@ def alternatives():
     )
 
 
+def test_get_interaction_data(choosers, alternatives):
+    seed = 123
+    sample_size = 2
+
+    def check_results(data, num_choosers, size, expected_choosers, exepected_alts):
+        for cc in choosers.columns:
+            assert cc in data.columns
+        for ac in alternatives.columns:
+            assert ac in data.columns
+        assert len(data) == num_choosers * size
+
+        choosers_idx = data.index.get_level_values(0).values
+        alts_idx = data.index.get_level_values(1).values
+        assert (choosers_idx == expected_choosers).all()
+        assert (alts_idx == expected_alts).all()
+
+    # with replacement
+    data, new_size = seeded_call(
+        seed, get_interaction_data, choosers, alternatives, sample_size)
+    expected_choosers = ['c', 'c', 'b', 'b', 'a', 'a']
+    expected_alts = [1, 3, 3, 4, 2, 3]
+    assert new_size == sample_size
+    check_results(data, len(choosers), new_size, expected_choosers, expected_alts)
+
+    # without replacement -- note not enough alternative to satify sample size
+    # so sample size will be adjusted to 1 per agent
+    data, new_size = seeded_call(
+        seed, get_interaction_data, choosers, alternatives, sample_size, False)
+    expected_choosers = ['c', 'b', 'a']
+    expected_alts = [4, 2, 1]
+
+
 def prob_call(interaction_data, num_choosers, sample_size, factor):
     # simple probabilities function that just uses the alt column as a weight
     util = factor * interaction_data['alt_col1'].values.reshape(num_choosers, sample_size)
