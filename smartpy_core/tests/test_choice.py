@@ -266,6 +266,46 @@ def test_capacity_choice_with_sampling(choosers, alternatives):
     assert (capacities == pd.Series([1, 2, 0, 0, 0], index=alternatives.index)).all()
 
 
+def test_capacity_choice_with_sampling_notEnoughCap(choosers, alternatives):
+    seed = 123
+    sample_size = 4
+
+    choices, capacities = seeded_call(
+        seed,
+        capacity_choice_with_sampling,
+        choosers,
+        alternatives.head(1),
+        'cap',
+        prob_call,
+        sample_size,
+        factor=2.0
+    )
+    print choices
+    assert choices.loc['c'] == 5
+    assert choices.loc['b'] == 5
+    assert (choices.isnull().values == [False, False, True]).all()
+    assert (capacities == pd.Series([0], index=pd.Index([5]))).all()
+
+
+def test_capacity_choice_with_sampling_finalI(choosers, alternatives):
+    seed = 123
+    sample_size = 4
+
+    choices, capacities = seeded_call(
+        seed,
+        capacity_choice_with_sampling,
+        choosers,
+        alternatives,
+        'cap',
+        prob_call,
+        sample_size,
+        max_iterations=1,
+        factor=2.0
+    )
+    assert (choices == pd.Series([5, 1, 4], index=choosers.index)).all()
+    assert (capacities == pd.Series([1, 1, 0, 1, 0], index=alternatives.index)).all()
+
+
 def test_get_mnl_probs(choosers, alternatives):
     # get some interaction data
     # note this chooses alt IDs [1, 3, 3, 4, 2, 3]

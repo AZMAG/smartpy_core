@@ -396,8 +396,6 @@ def capacity_choice_with_sampling(choosers,
         # handle the last iteration a litle differently
         sample_replace = True
         if i == max_iterations:
-            cap_rep = curr_cap.index.repeat(curr_cap.astype(int))
-            curr_alts = curr_alts.reindex(cap_rep)
             sample_replace = False
 
         # get the current choices
