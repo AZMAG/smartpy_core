@@ -278,13 +278,6 @@ def choice_with_sampling(choosers,
     chooser_idx = interaction_data.index.get_level_values(0).values
     alt_idx = interaction_data.index.get_level_values(1).values
 
-    print 'chooser idx:'
-    print chooser_idx
-
-    print ''
-    print 'alt idx:'
-    print alt_idx
-
     # assign weights/probabiltities to the alternatives
     # the result should a 2d numpy array with dim num choosers (rows) X num alts (cols)
     probs = probs_callback(
@@ -300,10 +293,6 @@ def choice_with_sampling(choosers,
     r = np.random.rand(num_choosers).reshape(num_choosers, 1)
     chosen_rel_idx = np.argmax(r < cs, axis=1)
     chosen_abs_idx = chosen_rel_idx + (np.arange(num_choosers) * sample_size)
-
-    print ''
-    print 'chosen abs idx:'
-    print chosen_abs_idx
 
     curr_choices = pd.DataFrame(
         {
@@ -389,8 +378,6 @@ def capacity_choice_with_sampling(choosers,
 
     for i in range(1, max_iterations + 1):
 
-        print i
-
         # filter out choosers who have already chosen
         curr_choosers = choosers[choices.isnull()]
         num_choosers = len(curr_choosers)
@@ -438,3 +425,66 @@ def capacity_choice_with_sampling(choosers,
         capacity -= chosen.value_counts().reindex(capacity.index).fillna(0)
 
     return choices, capacity
+
+
+def get_mnl_probs(interaction_data, num_choosers, sample_size, coeff, expr=None):
+    """
+    Returns probabilities for each sampled alternative in an interaction dataset,
+    based on a coefficients table. The resulting probabilities are re-shaped such
+    that the number of rows matches the number of choosers and the number of columns
+    matches the sample size. The probabilities of the alternatives for each chooser
+    will sum to 1.
+
+    Parameters:
+    -----------
+    interaction_data: pandas.DataFrame
+        Data frame containing sampled alternatives and chooser characteristics. Should
+        be indexed by the choosers (level 0) and the alternatives (level 1).
+    num_choosers: int
+        Number of choosers in the interaction data.
+    sample_size: int
+        Number of alternatives sampled by each chooser.
+    coeff: pandas.Series
+        Series containing coefficients. Index is the variable
+        name, the value the coefficient.
+    expr: string, optional, default None
+        If provided, applies a patsy expression to generate the design matrix.
+        If not provided, the columns in the coefficents must already exist in
+        the interaction data frame.
+
+    Notes:
+    -------
+    - Creating the patsy design matrix sometime has poor performance. See if
+      there are ways to improve this.
+    - See if there are ways to do dynamic variable computing (as is done by patsy)
+    with other frameworks such as orca?
+    - Just as with the binary logit, I'm not sure how to interface this with
+    custom patsy functions.
+
+    Returns:
+    --------
+    numpy.array with shape (num_choosers, sample_size)
+
+    """
+
+    # format the data
+    if expr is not None:
+        model_design = dmatrix(expr, data=interaction_data, return_type='dataframe')
+        if 'Intercept' in model_design.columns:
+            model_design.drop('Intercept', axis=1, inplace=True)
+        coeff = coeff.reindex(model_design.columns)
+    else:
+        coeff_cols = list(coeff.index.values)
+        if 'Intercept' in coeff_cols:
+            coeff = coeff.drop('Intercept')
+            coeff_cols = list(coeff.index.values)
+        model_design = dmatrix(interaction_data[coeff_cols], return_type='dataframe')
+
+    # get utilities
+    coeff = np.reshape(np.array(coeff.values), (1, len(coeff)))
+    model_data = np.transpose(model_design.as_matrix())
+    utils = np.dot(coeff, model_data).reshape(num_choosers, sample_size)
+    exp_utils = np.exp(utils)
+
+    # return probabilities
+    return exp_utils / exp_utils.sum(axis=1, keepdims=True)

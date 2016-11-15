@@ -264,3 +264,33 @@ def test_capacity_choice_with_sampling(choosers, alternatives):
     )
     assert (choices == pd.Series([1, 5, 2], index=choosers.index)).all()
     assert (capacities == pd.Series([1, 2, 0, 0, 0], index=alternatives.index)).all()
+
+
+def test_get_mnl_probs(choosers, alternatives):
+    # get some interaction data
+    # note this chooses alt IDs [1, 3, 3, 4, 2, 3]
+    # resulting alt_col1 values: [500, 300, 300, 200, 400, 300]
+    # resulting agent_col1 values: [10, 10, 20, 20, 30, 30]
+    sample_size = 2
+    data, new_size = seeded_call(
+        123, get_interaction_data, choosers, alternatives, sample_size)
+
+    # define some coeeficients
+    coeff = pd.Series([0.1, .01], index=pd.Index(['agent_col1', 'alt_col1']))
+
+    # expected results
+    exp_p = np.round([0.8807, 0.1192, 0.7310, 0.26894, 0.7310, 0.2689], 2)
+
+    # test w/out an expression
+    p1 = get_mnl_probs(data, len(choosers), sample_size, coeff)
+    assert (np.round(p1.ravel(), 2) == exp_p).all()
+
+    # test w/ patsy expression
+    expr = 'agent_col1 + alt_col1'
+    p2 = get_mnl_probs(data, len(choosers), sample_size, coeff, expr)
+    assert (np.round(p2.ravel(), 2) == exp_p).all()
+
+    # test w/ an intercept in the coefficients
+    coeff.loc['Intercept'] = 1
+    p3 = get_mnl_probs(data, len(choosers), sample_size, coeff)
+    assert (np.round(p3.ravel(), 2) == exp_p).all
