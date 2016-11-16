@@ -411,12 +411,12 @@ def capacity_choice_with_sampling(choosers,
 
         # handle choices chosen by multiple agents
         # prefer agents with higher probabilities, we can think of this as an inverse choice
-        cap_reindex = broadcast(capacity, curr_choices['alternative_id'])
         curr_choices['inv_prob'] = get_segmented_probs(curr_choices, 'prob', 'alternative_id')
         curr_choices['r_inv_prob'] = randomize_probs(curr_choices['inv_prob'])
         curr_choices.sort('r_inv_prob', ascending=False, inplace=True)
-        cc = curr_choices.groupby('alternative_id').cumcount() + 1
-        chosen = curr_choices['alternative_id'][cc <= cap_reindex]
+        rank = curr_choices.groupby('alternative_id').cumcount() + 1
+        cap_reindex = broadcast(capacity, curr_choices['alternative_id'])
+        chosen = curr_choices[rank <= cap_reindex]['alternative_id']
         choices.loc[chosen.index] = chosen
 
         # update capacities
