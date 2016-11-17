@@ -34,7 +34,7 @@ def broadcast(right, left, left_fk=None):
     right aligned with the left.
 
     """
-
+    #
     # ensure that we can align correctly
     if not right.index.is_unique:
         raise ValueError("The right's index must be unique!")
