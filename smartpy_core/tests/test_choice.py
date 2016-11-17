@@ -334,3 +334,37 @@ def test_get_mnl_probs(choosers, alternatives):
     coeff.loc['Intercept'] = 1
     p3 = get_mnl_probs(data, len(choosers), sample_size, coeff)
     assert (np.round(p3.ravel(), 2) == exp_p).all
+
+
+def test_mnl_choice_with_sampling(choosers, alternatives):
+    seed = 123
+    sample_size = 4
+
+    coeff = pd.Series(
+        [0.5, .01],
+        index=['agent_col1', 'alt_col1']
+    )
+
+    # test 1 - no capacity
+    choices = seeded_call(
+        seed,
+        mnl_choice_with_sampling,
+        choosers,
+        alternatives,
+        coeff
+    )
+    assert (choices == pd.Series([1, 3, 1], index=choosers.index)).all()
+
+    # test 2 - with capacities, use a patsy expression this time
+    expr = 'agent_col1 + alt_col1'
+    choices = seeded_call(
+        seed,
+        mnl_choice_with_sampling,
+        choosers,
+        alternatives,
+        coeff,
+        expr,
+        sample_size=sample_size,
+        cap_col='cap'
+    )
+    assert (choices == pd.Series([4, 2, 1], index=choosers.index)).all()

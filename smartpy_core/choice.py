@@ -486,3 +486,54 @@ def get_mnl_probs(interaction_data, num_choosers, sample_size, coeff, expr=None)
 
     # return probabilities
     return exp_utils / exp_utils.sum(axis=1, keepdims=True)
+
+
+def mnl_choice_with_sampling(choosers, alternatives, coeff, expr=None,
+                             sample_size=50, cap_col=None, max_iterations=10):
+    """
+    Runs a MNL style choice, with sampling of alternatives. Will respect capacities
+    if provided.
+
+    choosers: pandas.DataFrame
+        Data frame of agents making choices.
+    alternatives: pandas.DataFrame
+        Data frame of alternatives to choose from.
+    coeff: pandas.Series
+        Series containing coefficients. Index is the variable
+        name, the value the coefficient.
+    expr: string, optional, default None
+        If provided, applies a patsy expression to generate the design matrix.
+        If not provided, the columns in the coefficents must already exist in
+        the interaction data frame.
+    sample_size: int, optional, default 50
+        Number of alternatives to sample for each chooser.
+    cap_col: string, optional, default None
+        Column on the alternatives data frame to provide capacities. I not
+        provided the choice will be made without capacities.
+    max_iterations: integer, optional, default 10
+        Only applicable when capacities are provided. The number of iterations
+        to apply.
+
+    """
+
+    if cap_col is None:
+        choices = choice_with_sampling(
+            choosers,
+            alternatives,
+            get_mnl_probs,
+            sample_size=sample_size,
+            coeff=coeff,
+            expr=expr
+        )
+        return choices['alternative_id']
+    else:
+        choices, capacities = capacity_choice_with_sampling(
+            choosers,
+            alternatives,
+            cap_col,
+            get_mnl_probs,
+            sample_size=sample_size,
+            coeff=coeff,
+            expr=expr
+        )
+        return choices
