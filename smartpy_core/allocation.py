@@ -146,7 +146,7 @@ def get_constrained_allocation(amount, weights, capacities):
     return get_rounded(amount, a)
 
 
-def get_segmented_allocation(amounts, target_weights, target_segments):
+def get_segmented_allocation(amounts, target_weights, target_segments, do_round=True):
     """
     Allocates multiple amounts to target rows using weights. This
     allocation is un-constrained. This assumes there is a 1:m relationship
@@ -160,6 +160,8 @@ def get_segmented_allocation(amounts, target_weights, target_segments):
         Series from targets data frame of weights for allocating quantities.
     target_segments: pandas.Series
         Foreign key link to the amounts index. Should be aligned to the weights series.
+    do_round: optional, bool, default True
+        Indicates if allocated amount will be rounded.
 
     Returns:
     --------
@@ -192,7 +194,10 @@ def get_segmented_allocation(amounts, target_weights, target_segments):
     unrounded = t.amount * shares
 
     # round
-    rounded = get_rounded(amounts, unrounded, t.s)
+    if do_round:
+        rounded = get_rounded(amounts, unrounded, t.s)
+    else:
+        rounded = unrounded
 
     return rounded.reindex(target_weights.index).fillna(0)
 
