@@ -3,7 +3,7 @@ Contains IO operations for SQL Server.
 
 """
 
-import pandas.io.sql as pd_sql
+import pandas as pd
 import pyodbc
 
 
@@ -55,9 +55,6 @@ def sql_to_pandas(query, server, db, index_fld=None):
 
     """
     conn = get_db_connection(server, db)
-    if index_fld is None:
-        df = pd_sql.read_frame(query, conn)
-    else:
-        df = pd_sql.read_frame(query, conn, index_fld)
+    df = pd.read_sql(query, conn, index_fld)
     conn.close()
     return df
