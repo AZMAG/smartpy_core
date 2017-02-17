@@ -141,7 +141,7 @@ def explode(df, amount_col, index_col='index', keep_index=False):
     return exploded
 
 
-def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None):
+def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg_f='sum'):
     """
     Returns simple 2-dimensional pivot table. Also takes care of the aggregation.
     Optionally does some renaming of the columns. Right now this
@@ -171,7 +171,7 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None):
     if sum_col is None:
         piv = df.groupby([rows_col, cols_col]).size().unstack().fillna(0)
     else:
-        piv = df.groupby([rows_col, cols_col])[sum_col].sum().unstack().fillna(0)
+        piv = df.groupby([rows_col, cols_col])[sum_col].agg(agg_f).unstack().fillna(0)
 
     rename_columns(piv, prefix, suffix)
 
