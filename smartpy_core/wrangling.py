@@ -8,25 +8,38 @@ import numpy as np
 import pandas as pd
 
 
-def broadcast(right, left, left_fk=None):
+def broadcast(right, left, left_fk=None, right_pk=None, keep_right_index=False):
     """
     Re-indexes a series or data frame (right) to align with
     another (left) series or data frame via foreign key relationship.
-    The index of the right must be unique.
+    The index or keys on the right must be unique (i.e. this only supports
+    1:1 or 1:m relationhips between the right and left).
 
     Parameters:
     -----------
     right: pandas.DataFrame or pandas.Series
-        Columns or set of columns to re-project(broadcast).
-    left: pandas.Series or pandas.DataFrame
-        Foreign keys to join on. If a series is provided,
-        then the series values are used. To broadcast on
-        multiple columns, the left will be a DataFrame
-        and the left_fk must be provided.
+        Columns or set of columns to re-project(broadcast) from.
+    left: pandas.Series, pandas.Index or pandas.DataFrame
+        Object to align to.
+            if panadas.Series:
+                Series values are used as the foreign keys.
+            if pandas.Index:
+                The index will be used as the foreign keys.
+            if pandas.DataFrame
+                Use the 'left_fk` argument to specify one
+                or more columns to serve as the foreign keys.
     left_fk: str or list of str
-        Use this when broadcasting across multiple
-        columns. The right index in the case should
-        be a multindex.
+        Only applicable if 'left' is a dataframe.
+        Column or list of columns to serve as foreign keys.
+        If not provided the `left's` index will be used.
+    right_pk: str or list of str, default None
+        Column or list of columns that uniquely define each row
+        in the the `right`. If not provided, the `right's` index will be
+        used.
+    keep_right_index: bool, optional, default False
+        If True, and the `right` is a data frame, and a `right_pk` arg is provided,
+        then column(s) containing the `right's` index values will be
+        appended to the result.
 
     Returns:
     --------
@@ -34,39 +47,39 @@ def broadcast(right, left, left_fk=None):
     right aligned with the left.
 
     """
-    #
+    update_index = True
+
+    # if right primary keys are explicitly provided
+    if right_pk:
+        if keep_right_index:
+            right = right.reset_index()
+            right.set_index(right_pk, inplace=True)
+        else:
+            right = right.set_index(right_pk)
+
     # ensure that we can align correctly
     if not right.index.is_unique:
         raise ValueError("The right's index must be unique!")
 
-    # simpler case:
-    # if the left is a single series then just re-index
-    # this is the old way we were doing this
-    if isinstance(left_fk, str):
-        left = left[left_fk]
+    # decide how to broadcast based on the type of left provided
+    if isinstance(left, pd.Index):
+        update_index = False
 
-    if isinstance(left, pd.Series):
-        a = right.reindex(left)
-        a.index = left.index
-        return a
+    if isinstance(left, pd.DataFrame):
+        if left_fk:
+            left = left[left_fk]
+        else:
+            left = left.index
+            update_index = False
 
-    # when broadcasting multiple columns
-    # i.e. the right has a multindex
-    # if a series for the right provided, convert to a data frame
-    if isinstance(right, pd.Series):
-        right = right.to_frame('right')
-        right_cols = 'right'
-    else:
-        right_cols = right.columns
+    # reindex
+    a = right.reindex(left)
 
-    # do the merge
-    return pd.merge(
-        left=left,
-        right=right,
-        left_on=left_fk,
-        right_index=True,
-        how='left'
-    )[right_cols]
+    # update the index if necessary
+    if update_index:
+        a.index = left.index.copy()
+
+    return a
 
 
 def handle_nulls(s, drop_na=False, fill_value=0):
