@@ -82,6 +82,27 @@ def broadcast(right, left, left_fk=None, right_pk=None, keep_right_index=False):
     return a
 
 
+def fill_nulls(data, fill_value=0, inplace=False):
+    """
+    Fill nans and inf in 1 shot.
+
+    Parameters:
+    -----------
+    data: pandas.DataFrame or panda.Series
+        The data containing values to fill.
+    fill_value: optional, defualt 0
+        The value to fill nulls with.
+    inplace: bool, optional, default False
+        If True, the data is modified in place, nothing is returned.
+        If False, a copy of the data frame with filled values is returned.
+
+    """
+    if inplace:
+        data.replace([np.inf, -np.inf, np.nan], fill_value, inplace=True)
+    else:
+        return data.replace([np.inf, -np.inf, np.nan], fill_value)
+
+
 def handle_nulls(s, drop_na=False, fill_value=0):
     """
     Handles null values in a series.
@@ -105,7 +126,7 @@ def handle_nulls(s, drop_na=False, fill_value=0):
     if drop_na:
         return s.dropna()
     else:
-        return s.fillna(fill_value)
+        return fill_nulls(s, fill_value)
 
 
 def rename_columns(df, prefix='', suffix='', cols=None):
