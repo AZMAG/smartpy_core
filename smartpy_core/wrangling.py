@@ -65,6 +65,12 @@ def broadcast(right, left, left_fk=None, right_pk=None, keep_right_index=False):
     if isinstance(left, pd.Index):
         update_index = False
 
+    # for cases where a left_fk is provided as a list with a single element
+    if left_fk:
+        if isinstance(left_fk, list):
+            if len(left_fk) == 1:
+                left_fk = left_fk[0]
+
     if isinstance(left, pd.DataFrame):
         if left_fk:
             left = left[left_fk]
@@ -212,6 +218,173 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg
     return piv
 
 
+def agent_h_agg(df, val_cols, segment_cols, min_size, agg_f='mean', size_col=None):
+    """
+    ?? this is more of an imputer, how do we fashion this more for zones?
+
+
+    """
+
+    if isinstance(val_cols, str):
+        val_cols = [val_cols]
+
+    # init results with nans
+    results = pd.DataFrame(
+        columns={x: [] for x in val_cols},
+        index=df.index.copy()
+    )
+
+    # ignore nulls when aggregating
+    df_noNa = df.dropna(subset=val_cols)
+
+    for i in range(0, len(segment_cols) + 1):
+
+        # identify rows still needing a value
+        is_null = results.isnull().any(axis=1)
+
+        # exit if every row has been assigned
+        if not is_null.any():
+            break
+
+        # if we've exhausted all segments, take global values
+        if i == len(segment_cols):
+            for c in val_cols:
+                results.loc[is_null, c] = df_noNa[c].agg(agg_f)
+            break
+
+        # get current aggregation
+        curr_segs = segment_cols[i:]
+        curr_grps = df_noNa.groupby(curr_segs)
+        curr_agg = broadcast(
+            curr_grps[val_cols].agg(agg_f), df, curr_segs)
+
+        # assign aggregated values where minimum thresholds are met
+        if size_col:
+            curr_sizes = broadcast(curr_grps[size_col].sum(), df, curr_segs).fillna(0)
+        else:
+            curr_sizes = broadcast(curr_grps.size(), df, curr_segs).fillna(0)
+
+        gt_thresh = curr_sizes >= min_size
+        to_assign = is_null & gt_thresh
+        results[to_assign] = curr_agg[to_assign]
+
+    return results
+
+
+def agg_to(from_df, to_df, val_cols, segment_cols, min_size=0, size_col=None, agg_f='mean'):
+    """
+    Aggregates a data frame to align with another, while meeting minimum size
+    thresholds. The aggregations are applied iteratively, checking the row counts or sums
+    against the threshold at each iteration: only rows meeting the threshold will be
+    assigned the aggregation at that iteration. Each subsequent iteration removes the left-most
+    segment from the segment list. Rows not meeting the minimum threshold at any
+    aggregation level will be assigned the global values.
+
+    Parameters:
+    -----------
+    from_df: pandas.DataFrame
+        Data frame aggregating from.
+    to_df: pandas.DataFrame
+        Data frame aggregating to.
+    val_cols: str or list of str
+        List of columns in the `from_df` to aggregate.
+    segment_cols: str or list of str
+        Group by columns. Should be ordered from more to less detail.
+    min_size: int, optional, default 0
+        Defines the threshold a given aggregation must meet.
+    size_col: str, optional default None
+        If provided, uses a column (and the resulting sums) check against the threshold.
+        If not provided, row counts are used to check against the threshold.
+    agg_f: str, optional, default `mean`
+        The aggregate function to apply.
+
+    Returns:
+    --------
+    pandas.DataFrame
+
+    """
+
+    if isinstance(val_cols, str):
+        val_cols = [val_cols]
+
+    if isinstance(segment_cols, str):
+        segment_cols = [segment_cols]
+
+    # init results with nans
+    results = pd.DataFrame(
+        columns={x: [] for x in val_cols},
+        index=to_df.index.copy()
+    )
+
+    # remove rows with nulls
+    from_cols = val_cols + segment_cols
+    if size_col:
+        from_cols.append(size_col)
+    from_df = from_df[from_cols].dropna(subset=val_cols)
+
+    # get columns for broacasting/reindexing the agg results back to the to_df
+    # assume that if a given column is not in the table, it exists as a level in the index
+    reidx_by = []
+    for c in segment_cols:
+        if c in to_df.columns:
+            print '{} in columns'.format(c)
+            reidx_by.append(to_df[c])
+        elif c in to_df.index.names:
+            print '{} in index'.format(c)
+            reidx_by.append(to_df.index.get_level_values(c))
+        else:
+            raise ValueError('Column {}, is missing from the to dataframe'.format(c))
+
+    # iteratively aggregate, each time with one less segment, until all thresholds are met
+    for i in range(0, len(segment_cols) + 1):
+
+        # identify rows still needing a value
+        is_null = results.isnull().any(axis=1)
+
+        # exit if every row has been assigned
+        if not is_null.any():
+            break
+
+        # if we've exhausted all segments, take global values
+        if i == len(segment_cols):
+            for c in val_cols:
+                results.loc[is_null, c] = from_df[c].agg(agg_f)
+            break
+
+        # get current aggregation
+        curr_segs = segment_cols[i:]
+        curr_reidx = reidx_by[i:]
+        if len(curr_reidx) == 1:
+            # for some reason, can't reindex with a list if the list has a single item
+            curr_reidx = curr_reidx[0]
+
+        curr_grps = from_df.groupby(curr_segs)
+        curr_agg = curr_grps[val_cols].agg(agg_f)
+        curr_agg = curr_agg.reindex(curr_reidx)
+        curr_agg.index = to_df.index
+
+        # assign aggregate values where the minimum thresholds are met
+        if min_size == 0:
+            return curr_agg
+
+        if size_col:
+            # compare threshold with sums from a column
+            curr_sizes = curr_grps[size_col].sum()
+        else:
+            # compare thresholds with record counts
+            curr_sizes = curr_grps.size()
+
+        curr_sizes = curr_sizes.reindex(curr_reidx)
+        curr_sizes.index = to_df.index
+        curr_sizes.fillna(0, inplace=True)
+
+        gt_thresh = curr_sizes >= min_size
+        to_assign = is_null & gt_thresh
+        results[to_assign] = curr_agg[to_assign]
+
+    return results
+
+
 def hierarchy_aggregate(target_df, source_df, agg_col, segment_cols, agg_f='mean'):
     """
     Aggregates in a manner so that 0 values will not be be represented in
@@ -253,8 +426,9 @@ def hierarchy_aggregate(target_df, source_df, agg_col, segment_cols, agg_f='mean
 
         if i == num_segs:
             # no more segments left, just take the global aggregate
-            seg = pd.Series(np.ones(len(target_df)), index=target_df.index)
-            result[result == 0] = source_df.groupby(seg)[agg_col].agg(agg_f)
+            # seg = pd.Series(np.ones(len(target_df)), index=target_df.index)
+            # result[result == 0] = source_df.groupby(seg)[agg_col].agg(agg_f)
+            result[result == 0] = source_df[agg_col].agg(agg_f)
             break
 
         # perform the aggregation
