@@ -218,57 +218,52 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg
     return piv
 
 
-def agent_h_agg(df, val_cols, segment_cols, min_size, agg_f='mean', size_col=None):
+def impute(df, cols, segment_cols, min_size=1, size_col=None, agg_f='mean'):
     """
-    ?? this is more of an imputer, how do we fashion this more for zones?
+    Imputes missing (null, nan) values in a data frame.
 
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        Data frame to impute.
+    cols: str or list of str
+        Columns in the data frame to impute. If multiple columns are provided,
+        ALL the provided columns will be imputed if ANY of them  have nulls.
+    segment_cols: str or list of str
+        Columns that will guide the imputation. Items should be ordered to refelct
+        decreasing detail.
+    min_size: int, optional, default 1
+        Threshold for determining if a given level of aggregation is sufficient for
+        imputing.
+    size_col: str, optional defualt None
+        If provided, the given columns sums are checked against the minimum threshold.
+        If not provided, row counts are used to check against the minimum threshold
+    agg_f: str or callable, optional, default `mean`
+        The aggregate function to use for imputing.
+
+    Returns:
+    --------
+    pandas.DataFrame containing the imputed columns,
+    pandas.Index of rows that have been updated
 
     """
+    if isinstance(cols, str):
+        cols = [cols]
 
-    if isinstance(val_cols, str):
-        val_cols = [val_cols]
+    if isinstance(segment_cols, str):
+        segment_cols = [segment_cols]
 
-    # init results with nans
-    results = pd.DataFrame(
-        columns={x: [] for x in val_cols},
-        index=df.index.copy()
-    )
+    # get imputed values for rows with nulls
+    impute_rows = df[df[cols].isnull().any(axis=1)]
+    impute_grps = impute_rows.groupby(segment_cols).size().to_frame('cnt')
+    impute_agg = agg_to(
+        df, impute_grps, cols, segment_cols, min_size, size_col, agg_f)
+    impute_agg_broad = broadcast(impute_agg, impute_rows, segment_cols)
 
-    # ignore nulls when aggregating
-    df_noNa = df.dropna(subset=val_cols)
-
-    for i in range(0, len(segment_cols) + 1):
-
-        # identify rows still needing a value
-        is_null = results.isnull().any(axis=1)
-
-        # exit if every row has been assigned
-        if not is_null.any():
-            break
-
-        # if we've exhausted all segments, take global values
-        if i == len(segment_cols):
-            for c in val_cols:
-                results.loc[is_null, c] = df_noNa[c].agg(agg_f)
-            break
-
-        # get current aggregation
-        curr_segs = segment_cols[i:]
-        curr_grps = df_noNa.groupby(curr_segs)
-        curr_agg = broadcast(
-            curr_grps[val_cols].agg(agg_f), df, curr_segs)
-
-        # assign aggregated values where minimum thresholds are met
-        if size_col:
-            curr_sizes = broadcast(curr_grps[size_col].sum(), df, curr_segs).fillna(0)
-        else:
-            curr_sizes = broadcast(curr_grps.size(), df, curr_segs).fillna(0)
-
-        gt_thresh = curr_sizes >= min_size
-        to_assign = is_null & gt_thresh
-        results[to_assign] = curr_agg[to_assign]
-
-    return results
+    # assign
+    results = df[cols].copy()
+    results.loc[impute_rows.index, cols] = impute_agg_broad
+    return results, impute_agg_broad.index
 
 
 def agg_to(from_df, to_df, val_cols, segment_cols, min_size=0, size_col=None, agg_f='mean'):
@@ -295,7 +290,7 @@ def agg_to(from_df, to_df, val_cols, segment_cols, min_size=0, size_col=None, ag
     size_col: str, optional default None
         If provided, uses a column (and the resulting sums) check against the threshold.
         If not provided, row counts are used to check against the threshold.
-    agg_f: str, optional, default `mean`
+    agg_f: str or callable, optional, default `mean`
         The aggregate function to apply.
 
     Returns:
@@ -327,10 +322,8 @@ def agg_to(from_df, to_df, val_cols, segment_cols, min_size=0, size_col=None, ag
     reidx_by = []
     for c in segment_cols:
         if c in to_df.columns:
-            print '{} in columns'.format(c)
             reidx_by.append(to_df[c])
         elif c in to_df.index.names:
-            print '{} in index'.format(c)
             reidx_by.append(to_df.index.get_level_values(c))
         else:
             raise ValueError('Column {}, is missing from the to dataframe'.format(c))
@@ -387,6 +380,9 @@ def agg_to(from_df, to_df, val_cols, segment_cols, min_size=0, size_col=None, ag
 
 def hierarchy_aggregate(target_df, source_df, agg_col, segment_cols, agg_f='mean'):
     """
+
+    OLD -- use `to_agg` method above instead
+
     Aggregates in a manner so that 0 values will not be be represented in
     the aggregate. Useful for things like medians and averages where want
     everything in our target to be represented by something, for example
