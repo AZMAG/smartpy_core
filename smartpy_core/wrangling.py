@@ -562,6 +562,36 @@ def hierarchy_pivot(target_df, source_df, agg_col, segment_cols, group_col, agg_
     return piv
 
 
+def location_quotients(df, level=0):
+    """
+    Returns location quotients.
+
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        Data to compute location quotients for. Will compute a quotient
+        for each row and column
+    level: int, optional, default 0
+        Only applicable if the data frame has multi-level columns.
+        Defines the level of columns to use, each group
+        within the level will be computed independently.
+
+    Returns:
+    --------
+    pandas.DataFrame
+
+    """
+
+    col_sums = df.sum()
+
+    if isinstance(df.columns, pd.MultiIndex):
+        col_shares = col_sums.divide(col_sums.groupby(level=level).sum())
+        row_shares = df.divide(df.groupby(level=level, axis=1).sum())
+        return row_shares / col_shares
+    else:
+        return df.divide(df.sum(axis=1), axis=0).divide(col_sums / col_sums.sum())
+
+
 def stochastic_round(unrounded):
     """
     Randomly rounds using the fractional component as
