@@ -4,8 +4,75 @@ data wrangling operations with Pandas and Numpy.
 
 """
 
+import random
 import numpy as np
 import pandas as pd
+
+
+class Seeded(object):
+    """
+    Context manager for handling reproduceable random seed sequences. Mangages
+    both python and numpy random states.
+
+    Parameters:
+    -----------
+    seed: int
+        Seed to initialize the sequence.
+
+    Sample usage:
+    ------------
+
+        # 1st sequence
+        s1 = Seeded(1)
+        with s1:
+            r1a = np.random.rand(10)
+        r1b = np.random.rand(10)
+        with s1:
+            r1c = np.random.rand(10)
+
+        # 2nd sequence w same seed
+        s2 = Seeded(1)
+        with s2:
+            r2a = np.random.rand(10)
+        r2b = np.random.rand(10)
+        with s2:
+            r2c = np.random.rand(10)
+
+        assert (r1a == r2a).all()
+        assert (r1b != r2b).any()
+        assert (r1c == r2c).all()
+
+    """
+
+    def __init__(self, seed):
+
+        # temporarily capture the current state
+        orig_py_state, orig_np_state = self._get_states()
+
+        # init new states based on the provided seed
+        random.seed(seed)
+        np.random.seed(seed)
+
+        self._py_state = random.getstate()
+        self._np_state = np.random.get_state()
+
+        # revert back to the original state
+        self._set_states(orig_py_state, orig_np_state)
+
+    def __enter__(self):
+        self._old_py_state, self._old_np_state = self._get_states()
+        self._set_states(self._py_state, self._np_state)
+
+    def __exit__(self, *args):
+        self._py_state, self._np_state = self._get_states()
+        self._set_states(self._old_py_state, self._old_np_state)
+
+    def _get_states(self):
+        return random.getstate(), np.random.get_state()
+
+    def _set_states(self, py_state, np_state):
+        random.setstate(py_state)
+        np.random.set_state(np_state)
 
 
 def broadcast(right, left, left_fk=None, right_pk=None, keep_right_index=False):
