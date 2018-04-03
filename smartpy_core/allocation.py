@@ -168,8 +168,9 @@ def get_segmented_allocation(amounts, target_weights, target_segments, do_round=
     Pandas series of resulting allocation.
 
     """
-    if (amounts % 1 != 0).any():
-        raise ValueError('Amounts must be  whole numbers')
+    if do_round:
+        if (amounts % 1 != 0).any():
+            raise ValueError('Amounts must be  whole numbers')
 
     if not amounts.index.is_unique:
         raise ValueError('Amounts index must be unique')
