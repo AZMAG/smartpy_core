@@ -1,3 +1,4 @@
+import random
 import pandas as pd
 import pytest
 
@@ -156,3 +157,63 @@ def test_categorize():
         'more than 5'
     ])
     assert (cats == categorize(s, breaks, labels)).all()
+
+
+#####################
+# SEEDED CALLS
+#####################
+
+def test_seeded():
+
+    # init some seeded objects
+    s1 = Seeded(1)
+    s2 = Seeded(2)
+    s3 = Seeded(1)  # should yield the same results as s1
+
+    # 1st calls
+    with s1:
+        r1_1 = random.random()
+        r1_1_np = np.random.rand(10)
+
+    with s2:
+        r2_1 = random.random()
+        r2_1_np = np.random.rand(10)
+
+    with s3:
+        r3_1 = random.random()
+        r3_1_np = np.random.rand(10)
+
+    def_1 = random.random()  # default random env
+
+    # 2nd calls
+    with s1:
+        r1_2 = random.random()
+        r1_2_np = np.random.rand(10)
+
+    with s2:
+        r2_2 = random.random()
+        r2_2_np = np.random.rand(10)
+
+    with s3:
+        r3_2 = random.random()
+        r3_2_np = np.random.rand(10)
+
+    def_2 = random.random()  # default random env
+
+    # assertions for python randoms
+    assert r1_1 == r3_1 and r1_2 == r3_2
+    assert r1_1 != r2_1 or r1_2 != r2_2
+    assert r1_1 != def_1 or r1_2 != def_2
+
+    # assertions for numpy randoms
+    assert (np.append(r1_1_np, r1_2_np) == np.append(r3_1_np, r3_2_np)).all()
+    assert (np.append(r1_1_np, r1_2_np) != np.append(r2_1_np, r2_2_np)).any()
+
+    # test using a call instead of a with block
+    def get_rand(size):
+        return np.random.rand(size)
+
+    s_call = Seeded(1)
+    s_cal1_r1 = s_call(get_rand, 10)
+    s_call_r2 = s_call(get_rand, 10)
+    assert (np.append(r1_1_np, r1_2_np) == np.append(s_cal1_r1, s_call_r2)).all()

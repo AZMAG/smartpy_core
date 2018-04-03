@@ -19,30 +19,14 @@ class Seeded(object):
     seed: int
         Seed to initialize the sequence.
 
-    Sample usage:
-    ------------
-
-        # 1st sequence
-        s1 = Seeded(1)
-        with s1:
-            r1a = np.random.rand(10)
-        r1b = np.random.rand(10)
-        with s1:
-            r1c = np.random.rand(10)
-
-        # 2nd sequence w same seed
-        s2 = Seeded(1)
-        with s2:
-            r2a = np.random.rand(10)
-        r2b = np.random.rand(10)
-        with s2:
-            r2c = np.random.rand(10)
-
-        assert (r1a == r2a).all()
-        assert (r1b != r2b).any()
-        assert (r1c == r2c).all()
-
     """
+
+    def _get_states(self):
+        return random.getstate(), np.random.get_state()
+
+    def _set_states(self, py_state, np_state):
+        random.setstate(py_state)
+        np.random.set_state(np_state)
 
     def __init__(self, seed):
 
@@ -60,19 +44,41 @@ class Seeded(object):
         self._set_states(orig_py_state, orig_np_state)
 
     def __enter__(self):
+        """
+        Temporarily sets the random state to the current seed state,
+        called when entering a `with` block.
+
+        """
         self._old_py_state, self._old_np_state = self._get_states()
         self._set_states(self._py_state, self._np_state)
 
     def __exit__(self, *args):
+        """
+        Reverts the random state to the default random environment,
+        called when leaving a `with` block.
+
+        """
         self._py_state, self._np_state = self._get_states()
         self._set_states(self._old_py_state, self._old_np_state)
 
-    def _get_states(self):
-        return random.getstate(), np.random.get_state()
+    def __call__(self, func, *args, **kwargs):
+        """
+        Executes the provided function and arguments with the current seed state,
+        accepts function arguments as either args or named keyword args.
 
-    def _set_states(self, py_state, np_state):
-        random.setstate(py_state)
-        np.random.set_state(np_state)
+        Parameters:
+        -----------
+        func: callable
+            Function to call using the current seeded state
+
+        Returns:
+        --------
+        Results of the function
+
+        """
+        with self:
+            results = func(*args, **kwargs)
+        return results
 
 
 def broadcast(right, left, left_fk=None, right_pk=None, keep_right_index=False):
