@@ -293,7 +293,9 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg
 
 def impute(df, cols, segment_cols, min_size=1, size_col=None, agg_f='mean'):
     """
-    Imputes missing (null, nan) values in a data frame.
+    Imputes missing (null, nan) values in a data frame. Optionally
+    imputes values for rows where the count/size is below the
+    desired threshold.
 
     Parameters:
     -----------
@@ -326,8 +328,11 @@ def impute(df, cols, segment_cols, min_size=1, size_col=None, agg_f='mean'):
     if isinstance(segment_cols, str):
         segment_cols = [segment_cols]
 
-    # get imputed values for rows with nulls
-    impute_rows = df[df[cols].isnull().any(axis=1)]
+    # get imputed values for rows with nulls or with counts below the threshold
+    to_impute = df[cols].isnull().any(axis=1)
+    if size_col:
+        to_impute = to_impute | (df[size_col] < min_size)
+    impute_rows = df[to_impute]
     impute_grps = impute_rows.groupby(segment_cols).size().to_frame('cnt')
     impute_agg = agg_to(
         df, impute_grps, cols, segment_cols, min_size, size_col, agg_f)
