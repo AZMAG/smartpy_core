@@ -750,3 +750,92 @@ def categorize(series, breaks, labels=None, break_adj=0):
         ),
         index=series.index
     )
+
+
+def segmented_ntile(df, segment_col, val_col, num_tiles=5):
+    """
+    Get group/segement specific n-tiles. Ties will be decided randomly.
+
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        Data frame containing data to tile.
+    segment_col: str
+        Column in the data frame that will segment the tiles.
+    val_col: str
+        Column in the data frame to tile.
+    num_tiles: int, optional, default 5
+        Number of tiles, by default quintiles.
+
+    Returns:
+    -------
+    pandas.Series
+
+    """
+    t = df[val_col] + np.random.rand(len(df))
+    t.sort_values(inplace=True)
+    r = df[segment_col].reindex(t.index)
+    cc = r.groupby(r).cumcount()
+    s = broadcast(r.groupby(r).size(), r)
+
+    return 1 + ((cc / s) * num_tiles).astype(int)
+
+
+def _get_interest_factor(mortgage_rate, num_years=30):
+    """
+    Returns a factor for converting between rents and prices
+    given borrowing assumptions.
+
+    Parameters:
+    -----------
+    mortgage_rate: numeric or pandas.Series
+        Morgtage rate assumption(s).
+    num_years: optional, int, default 30
+        Number of years in the mortgage.
+
+    Returns:
+    --------
+    numeric or pandas.Series
+
+    """
+    num_months = 12 * num_years
+    monthly_interest = mortgage_rate / 12
+
+    numer = ((1 + monthly_interest) ** num_months) - 1
+    denom = ((1 + monthly_interest) ** num_months) * monthly_interest
+
+    return numer / denom
+
+
+def rent_to_price(rent, mortgage_rate,
+                  profit_rate=.02, overhead_rate=.2, inflation_rate=1, num_years=30):
+    """
+    Estimate prices from rental values, based on assumed monthly payments on
+    a mortage years and assumed profit and inflation assumptions.
+
+    ** TODO: this approachs needs some TLC. **
+
+    Parameters:
+    -----------
+    rent: numeric or pandas.Series
+        The rent(s) to convert.
+    mortgage_rate: numeric or pandas.Series
+        Morgtage rate assumption(s).
+    profit_rate: optional, numeric or pandas.Series, default .02
+        Return on profit assumption(s). Default 2% ROI.
+    overhead_rate: optional, numeric or pandas.Series, default .2
+        Factor for additional monthly expenses such as insurance, property taxes and maintenance.
+        Default 20% of monthly rent.
+    inflation_rate: optional, numeric or pandas.Series, default 1
+        Inflation factor(s) to apply.
+    num_years: optional, int, default 30
+        Number of years in the mortgage.
+
+    Returns:
+    --------
+    numeric or pandas.Series
+
+    """
+    effective_rent = rent * (1 - (profit_rate + overhead_rate))
+    interest_factor = _get_interest_factor(mortgage_rate, num_years)
+    return np.round(effective_rent * interest_factor * inflation_rate).astype(int)
