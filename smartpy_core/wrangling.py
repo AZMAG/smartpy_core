@@ -264,8 +264,9 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg
     -----------
     df: pandas.DataFrame
         Data to pivot.
-    rows_col: string
-        Name of coumn to serve as the new index (i.e. rows).
+    rows_col: string or list of str
+        Name(s) of coumn to serve as the new index (i.e. rows). If a list with multiple
+        columns is provided the index will be a multi-index.
     cols_col: string
         Name of column whose unique values will generate columns.
     prefix: string, optional
@@ -281,10 +282,15 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg
 
     """
 
-    if sum_col is None:
-        piv = df.groupby([rows_col, cols_col]).size().unstack().fillna(0)
+    if not isinstance(rows_col, list):
+        group_cols = [rows_col, cols_col]
     else:
-        piv = df.groupby([rows_col, cols_col])[sum_col].agg(agg_f).unstack().fillna(0)
+        group_cols = rows_col + [cols_col]
+
+    if sum_col is None:
+        piv = df.groupby(group_cols).size().unstack().fillna(0)
+    else:
+        piv = df.groupby(group_cols)[sum_col].agg(agg_f).unstack().fillna(0)
 
     rename_columns(piv, prefix, suffix)
 
