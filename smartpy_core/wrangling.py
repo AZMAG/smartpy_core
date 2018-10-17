@@ -302,6 +302,57 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg
     return piv
 
 
+def tupelize(df, row_name='row', col_name='col', val_name='val'):
+    """
+    Converts a data frame matrix to tuples. There will be a row
+    for each row/column in the provided data frame.
+
+    Note: the datatypes in the resulting table will be of type object.
+    Cast to the desired type as needed. TODO: if all columns have the same
+    data type then maintain this (or cast to numeric).
+
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        Dataframe to tupelize.
+    row_name: str, optional, default `row`
+        Column name for t
+    col_name: str, optional, default `cols
+        Column name for the row identifier.
+    val_name: str, optional, default 'val'
+        Columns name for the values.
+
+    Returns:
+    --------
+    pandas.DataFrame
+
+    Sample input:
+
+        | use1 | use 2
+    ____|______________
+    a   | 10   | 200
+    b   | 20   | 300
+
+    Sample output:
+
+        | row  | col  | val
+    ------------------------
+    0   | a    | use1 | 10
+    1   | a    | use2 | 200
+    2   | b    | use1 | 20
+    3   | b    | use2 | 300
+
+
+    """
+    stacked = np.vstack((
+        np.repeat(df.index.values, len(df.columns)),
+        np.tile(df.columns, len(df)),
+        df.values.ravel()
+    )).T
+
+    return pd.DataFrame(stacked, columns=[row_name, col_name, val_name])
+
+
 def impute(df, cols, segment_cols, min_size=1, size_col=None, agg_f='mean'):
     """
     Imputes missing (null, nan) values in a data frame. Optionally
