@@ -122,6 +122,11 @@ def broadcast(right, left, left_fk=None, right_pk=None, keep_right_index=False):
     """
     update_index = True
 
+    # if we're broadcasting using a data frame , we need to know which column(s)
+    if isinstance(left, pd.DataFrame) and left_fk is None:
+        raise ValueError(
+            'If the left is a DataFrame, must supply the left_fk (column name to join on)')
+
     # if right primary keys are explicitly provided
     if right_pk:
         if keep_right_index:
