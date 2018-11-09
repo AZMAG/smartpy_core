@@ -302,10 +302,16 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg
     return piv
 
 
-def tupelize(df, row_name='row', col_name='col', val_name='val'):
+def tupelize(df, row_name=None, col_name='col', val_name='val'):
     """
-    Converts a data frame matrix to tuples. There will be a row
-    for each row/column in the provided data frame.
+    Converts a data frame matrix to tuples. There resulting data frame will have:
+
+        - A row for each column in the provided data frame.
+        - A column to hold the input data frame's row/index values.
+            If the provided dataframe has a multi-index there will be a
+            column for each level.
+        - A column to to store the input data frame's column names
+        - A column to store the input data frame's values.
 
     Note: the datatypes in the resulting table will be of type object.
     Cast to the desired type as needed. TODO: if all columns have the same
@@ -315,12 +321,16 @@ def tupelize(df, row_name='row', col_name='col', val_name='val'):
     -----------
     df: pandas.DataFrame
         Dataframe to tupelize.
-    row_name: str, optional, default `row`
-        Column name for t
+    row_name: str or list of str, optional, default None
+        The name(s) of the output column that will store the index values.
+        If None, the column name(s) will be derrived from the index names.
+        If None and the index name is None, the output column name will be
+        `row`for single-level indexes and `row_<level>` for multi-level
+        indexes.
     col_name: str, optional, default `cols
-        Column name for the row identifier.
+        The name of the output columns that will store the input column names.
     val_name: str, optional, default 'val'
-        Columns name for the values.
+        The name of the output Column name that will store the input data frame values.
 
     Returns:
     --------
@@ -342,15 +352,43 @@ def tupelize(df, row_name='row', col_name='col', val_name='val'):
     2   | b    | use1 | 20
     3   | b    | use2 | 300
 
-
     """
-    stacked = np.vstack((
-        np.repeat(df.index.values, len(df.columns)),
-        np.tile(df.columns, len(df)),
-        df.values.ravel()
-    )).T
+    to_stack = []
+    col_names = []
+    num_cols = len(df.columns)
+    num_levels = df.index.nlevels
 
-    return pd.DataFrame(stacked, columns=[row_name, col_name, val_name])
+    # for index values
+    for i in range(num_levels):
+        curr_level = df.index.get_level_values(i)
+        curr_name = curr_level.name
+        if curr_name is None:
+            if num_levels == 1:
+                curr_name = 'row'
+            else:
+                curr_name = 'row_{}'.format(i)
+        col_names.append(curr_name)
+        to_stack.append(np.repeat(curr_level.values, num_cols))
+
+    # override the row names if provided
+    if row_name is not None:
+        if not isinstance(row_name, list):
+            col_names = [row_name]
+        else:
+            if len(row_name) != num_levels:
+                raise ValueError('# of provided row names must match number of index levels')
+            col_names = row_name
+
+    # for column names
+    col_names.append(col_name)
+    to_stack.append(np.tile(df.columns, len(df)))
+
+    # for values
+    col_names.append(val_name)
+    to_stack.append(df.values.ravel())
+
+    # build the data frame
+    return pd.DataFrame(np.vstack(to_stack).T, columns=col_names)
 
 
 def impute(df, cols, segment_cols, min_size=1, size_col=None, agg_f='mean'):
