@@ -777,25 +777,41 @@ def stochastic_round(unrounded):
 
     Parameters:
     -----------
-    unrounded: pandas.Series
-        Floating point series to be rounded.
+    unrounded: pandas.Series or pandas.DataFrame
+        Floating point data to be rounded.
 
     Returns:
     --------
-    pandas.Series with rounded values.
+    pandas DataFrame or Series with rounded values.
 
     """
 
+    # if this is a data frame we will need to flatten and re-shape
+    is_df = isinstance(unrounded, pd.DataFrame)
+    if is_df:
+        unrounded_flat = unrounded.values.flatten()
+    else:
+        unrounded_flat = unrounded
+
     # round everything down
-    f = np.floor(unrounded)
+    f = np.floor(unrounded_flat).astype(int)
 
     # get the fractional component
-    fract = unrounded - f
+    fract = unrounded_flat - f
 
     # round up if the fraction is bigger than a random
-    ran = np.random.rand(len(unrounded))
+    ran = np.random.rand(len(fract))
     to_round_up = fract > ran
     f[to_round_up] += 1
+
+    # convert back to a dataframe if necessary
+    if is_df:
+        f = pd.DataFrame(
+            data=f.reshape(unrounded.shape),
+            columns=unrounded.columns,
+            index=unrounded.index
+        )
+
     return f
 
 
