@@ -702,8 +702,11 @@ def hierarchy_aggregate_groups(target_df, source_df, agg_col, segment_cols, grou
                 right_index=True,
                 how='left'
             )
-            new_df[agg_col].loc[null_rows.index] = null_rows_merge[agg_col].fillna(0)
-            new_df['segment'].loc[null_rows.index] = str(seg)
+
+            new_df.loc[null_rows.index, agg_col] = null_rows_merge[agg_col].fillna(0)
+            new_df.loc[null_rows.index, 'segment'] = str(seg)
+            # new_df[agg_col].loc[null_rows.index] = null_rows_merge[agg_col].fillna(0)
+            # new_df['segment'].loc[null_rows.index] = str(seg)
 
         # get remaining nulls and move on if we're done
         null_rows = new_df[new_df[agg_col] == 0]
