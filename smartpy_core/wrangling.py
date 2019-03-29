@@ -30,6 +30,9 @@ class Seeded(object):
 
     def __init__(self, seed):
 
+        # store the provided seed so we can fetch later if needed
+        self.__provided_seed = seed
+
         # temporarily capture the current state
         orig_py_state, orig_np_state = self._get_states()
 
@@ -51,6 +54,7 @@ class Seeded(object):
         """
         self._old_py_state, self._old_np_state = self._get_states()
         self._set_states(self._py_state, self._np_state)
+        return self
 
     def __exit__(self, *args):
         """
@@ -79,6 +83,13 @@ class Seeded(object):
         with self:
             results = func(*args, **kwargs)
         return results
+
+    def get_seed(self):
+        """
+        Returns the provided seed value.
+
+        """
+        return self.__provided_seed
 
 
 def broadcast(right, left, left_fk=None, right_pk=None, keep_right_index=False):
