@@ -4,6 +4,7 @@ data wrangling operations with Pandas and Numpy.
 
 """
 
+import time
 import random
 import numpy as np
 import pandas as pd
@@ -90,6 +91,46 @@ class Seeded(object):
 
         """
         return self.__provided_seed
+
+
+class HowLong():
+    """
+    Context manager for for measuring time it takes to do something.
+
+    Wrap a block of code into the with statement, after leaving the
+    block the time will be printed.
+
+    **
+        Will only work with py36 print_function, if on 2.7:
+        from __future__ import print_fucntion
+    **
+
+    Usage:
+    ------
+    t = HowLong()
+    with t:
+        # logic to time
+
+    """
+    def __enter__(self):
+        self.start = time.clock()
+
+    def __exit__(self, *args):
+        e = time.clock()
+        self.start
+        delta = e - self.start
+        if delta <= 60:
+            # minute or less
+            print('{} seconds'.format(delta))
+        elif delta <= 3600:
+            # hour or less
+            minutes = int(delta / 60)
+            secs = delta - (minutes * 60)
+            print('{} minutes, {} seconds'.format(minutes, secs))
+        else:
+            hours = int(delta / 3600)
+            minutes = (delta - (hours * 3600)) / 60
+            print('{} hours, minutes {}'.format(hours, minutes))
 
 
 def broadcast(right, left, left_fk=None, right_pk=None, keep_right_index=False):
