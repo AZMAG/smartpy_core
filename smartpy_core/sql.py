@@ -65,7 +65,7 @@ def sql_to_pandas(query, server, db, index_fld=None):
     return df
 
 
-def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists='fail', chunksize=50000):
+def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists='fail', chunksize=50000, dtypes=None):
     """
     Writes data from a pandas.DataFrame to sql server table.
 
@@ -90,6 +90,10 @@ def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists
         - append: Insert new values to the existing table.
     chunksize: int, default 50000
         Number of rows to insert at a given time.
+    dtypes: dict, optional, default None
+        Data types to override. Keys are column names, values are
+        sql alchemy data types.
+        see: https://docs.sqlalchemy.org/en/13/core/type_basics.html
 
     """
     # get the sql connection
@@ -108,12 +112,47 @@ def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists
         if executemany:
             cursor.fast_executemany = True
 
-    # for str columns, determine the output field lengths
-    out_types = {}
+    # infer sql data types, respect any user provided dtypes
+    if dtypes is not None:
+        out_types = dtypes.copy()
+    else:
+        out_types = {}
+
+    def get_int_fld_type(col):
+        """
+        Determines the sql int type based on the series value range.
+
+        """
+        min_val = df[col].min()
+        max_val = df[col].max()
+
+        if min_val >= -32767 and max_val <= 32767:
+            return sqlalchemy.SMALLINT()
+        elif min_val >= -2147483647 and max_val <= 2147483647:
+            return sqlalchemy.INT()
+        else:
+            return sqlalchemy.BIGINT()
+
+    # loop through the columns and assign types
     for col in df.columns:
-        if df[col].dtype == 'object':
+        if col in out_types:
+            continue
+
+        curr_dtype = str(df[col].dtype)
+
+        if curr_dtype == 'object':
+            # for str cols figure out the max characters needed
             max_chars = df[col].str.len().max()
             out_types[col] = sqlalchemy.VARCHAR(int(max_chars))
+
+        elif curr_dtype.startswith('float'):
+            # check for cases where everything implies an int (no decimal values)
+            # this typically occurs when the data is int but nulls are present
+            if (df[col].fillna(0) % 1 == 0).all():
+                out_types[col] = get_int_fld_type(col)
+
+        elif curr_dtype.startswith('int'):
+            out_types[col] = get_int_fld_type(col)
 
     # write the results
     df.to_sql(
