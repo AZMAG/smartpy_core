@@ -1010,3 +1010,100 @@ def rent_to_price(rent, mortgage_rate,
     effective_rent = rent * (1 - (profit_rate + overhead_rate))
     interest_factor = _get_interest_factor(mortgage_rate, num_years)
     return np.round(effective_rent * interest_factor * inflation_rate).astype(int)
+
+
+def parse_str_list(s, names):
+    """
+    Given a textual series with values implying a list,
+    returns a pandas.DataFrame with column for the implied elements.
+    There must be the same number of elements in each row.
+
+    Parameters:
+    -----------
+    s: pandas.Series
+        Series to parse, e.g. values:
+        '[10, 20, 40]'
+        '[24, 50, 34]'
+        ...
+    names: list of str
+        Names to apply to the columns. e.g
+        ['col1', 'col2', 'col3']
+
+    Returns:
+    --------
+    pandas.DataFrame
+
+    """
+    s_split = s.str[1:-1].str.split(',')
+    to_concat = {}
+    idx = 0
+    for n in names:
+        to_concat[n] = s_split.str[idx].astype(int)
+        idx += 1
+
+    return pd.concat(to_concat, axis=1)
+
+
+  def parse_buckets(s):
+    """
+    Parse a text series with an embedded dict,
+    return a dataframe with the values as separate
+    columns. The keys must match in every row.
+
+    Use this on the `bucketed` columns.
+
+    Parameters:
+    -----------
+    s: pandas.Series
+        Values to parse, e.g. expected values:
+        '{"a": 10, "b": 20}'
+        '{"a": 12, "b": 45}'
+        ...
+
+    Returns:
+    --------
+    pandas.DataFrame
+
+    """
+    s_split = s.str[1:-1].str.split(",")
+    num_cols = s_split.str.len().max()
+    to_concat = {}
+
+    for i in range(0, num_cols):
+        curr = s_split.str[i].str.split(":")
+        curr_col = curr.str[0].str[1:-1].unique()
+        assert len(curr_col == 1)
+        curr_col = curr_col[0]
+        curr_val = curr.str[1].astype(int)
+        to_concat[curr_col] = curr_val
+
+    return pd.concat(to_concat, axis=1)
+
+
+    def parse_dict_items(s, label_col, val_col):
+    """
+    Parse the dictionary embedded in a text
+    columns. The resulting data frame will
+    tuples.
+
+    This assumes the values in the dict are
+    integers. TODO: improve this.
+
+    Use this when the # of dictionary items
+    differs.
+
+    """
+    s_split = s_split = s.str[1:-1].str.split(",")
+    num_items = s_split.str.len()
+    idx = s_split.index.repeat(num_items)
+    stack = pd.Series(np.hstack(s_split), index=idx)
+    stack_split = stack.str.split(":")
+    stack_split_len = stack_split.str.len()
+    stack_split = stack_split[stack_split_len == 2]
+
+    return pd.concat({
+        label_col:  stack_split.str[0].str[1:-1],
+        val_col: stack_split.str[1].astype(int)
+    }, axis=1)
+
+
