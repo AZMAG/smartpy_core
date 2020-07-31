@@ -1044,66 +1044,66 @@ def parse_str_list(s, names):
     return pd.concat(to_concat, axis=1)
 
 
-  def parse_buckets(s):
-    """
-    Parse a text series with an embedded dict,
-    return a dataframe with the values as separate
-    columns. The keys must match in every row.
+def parse_buckets(s):
+"""
+Parse a text series with an embedded dict,
+return a dataframe with the values as separate
+columns. The keys must match in every row.
 
-    Use this on the `bucketed` columns.
+Use this on the `bucketed` columns.
 
-    Parameters:
-    -----------
-    s: pandas.Series
-        Values to parse, e.g. expected values:
-        '{"a": 10, "b": 20}'
-        '{"a": 12, "b": 45}'
-        ...
+Parameters:
+-----------
+s: pandas.Series
+    Values to parse, e.g. expected values:
+    '{"a": 10, "b": 20}'
+    '{"a": 12, "b": 45}'
+    ...
 
-    Returns:
-    --------
-    pandas.DataFrame
+Returns:
+--------
+pandas.DataFrame
 
-    """
-    s_split = s.str[1:-1].str.split(",")
-    num_cols = s_split.str.len().max()
-    to_concat = {}
+"""
+s_split = s.str[1:-1].str.split(",")
+num_cols = s_split.str.len().max()
+to_concat = {}
 
-    for i in range(0, num_cols):
-        curr = s_split.str[i].str.split(":")
-        curr_col = curr.str[0].str[1:-1].unique()
-        assert len(curr_col == 1)
-        curr_col = curr_col[0]
-        curr_val = curr.str[1].astype(int)
-        to_concat[curr_col] = curr_val
+for i in range(0, num_cols):
+    curr = s_split.str[i].str.split(":")
+    curr_col = curr.str[0].str[1:-1].unique()
+    assert len(curr_col == 1)
+    curr_col = curr_col[0]
+    curr_val = curr.str[1].astype(int)
+    to_concat[curr_col] = curr_val
 
-    return pd.concat(to_concat, axis=1)
+return pd.concat(to_concat, axis=1)
 
 
-    def parse_dict_items(s, label_col, val_col):
-    """
-    Parse the dictionary embedded in a text
-    columns. The resulting data frame will
-    tuples.
+def parse_dict_items(s, label_col, val_col):
+"""
+Parse the dictionary embedded in a text
+columns. The resulting data frame will
+tuples.
 
-    This assumes the values in the dict are
-    integers. TODO: improve this.
+This assumes the values in the dict are
+integers. TODO: improve this.
 
-    Use this when the # of dictionary items
-    differs.
+Use this when the # of dictionary items
+differs.
 
-    """
-    s_split = s_split = s.str[1:-1].str.split(",")
-    num_items = s_split.str.len()
-    idx = s_split.index.repeat(num_items)
-    stack = pd.Series(np.hstack(s_split), index=idx)
-    stack_split = stack.str.split(":")
-    stack_split_len = stack_split.str.len()
-    stack_split = stack_split[stack_split_len == 2]
+"""
+s_split = s_split = s.str[1:-1].str.split(",")
+num_items = s_split.str.len()
+idx = s_split.index.repeat(num_items)
+stack = pd.Series(np.hstack(s_split), index=idx)
+stack_split = stack.str.split(":")
+stack_split_len = stack_split.str.len()
+stack_split = stack_split[stack_split_len == 2]
 
-    return pd.concat({
-        label_col:  stack_split.str[0].str[1:-1],
-        val_col: stack_split.str[1].astype(int)
-    }, axis=1)
+return pd.concat({
+    label_col:  stack_split.str[0].str[1:-1],
+    val_col: stack_split.str[1].astype(int)
+}, axis=1)
 
 
