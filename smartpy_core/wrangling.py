@@ -1107,3 +1107,32 @@ def parse_dict_items(s, label_col, val_col):
     }, axis=1)
 
 
+def collapse_multi_cols(df, sep='_'):
+    """
+    Given a pandas data frame w/ a multi-columns index,
+    returns a list of columns names such that each level
+    is concatendated, thus reducing the dimensionality of the
+    columns leveles to 1.
+
+    Note: this func only returns the concatenated column names,
+    its up to the user to decide what to do with them, typical usage
+    would be:
+
+    df2 = df.copy()
+    df2.columns = collapse_multi_cols(df2)
+
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        Date frame with columns to collapse.
+    sep: str, optional, default '_'
+        Char to use when concatenating columns names.
+
+    Returns:
+    --------
+    list of str
+
+    """
+    num_levels = df.columns.nlevels
+    to_zip = [list(df.columns.get_level_values(i)) for i in range(0, num_levels)]
+    return list(map(sep.join, zip(*to_zip)))
