@@ -1107,7 +1107,8 @@ def parse_dict_items(s, label_col, val_col):
     }, axis=1)
 
 
-def collapse_multi_cols(df, sep='_'):
+
+def collapse_multi_cols(df, sep='_', ascending=True, level_order=None):
     """
     Given a pandas data frame w/ a multi-columns index,
     returns a list of columns names such that each level
@@ -1127,12 +1128,30 @@ def collapse_multi_cols(df, sep='_'):
         Date frame with columns to collapse.
     sep: str, optional, default '_'
         Char to use when concatenating columns names.
+    ascending: optional, bool, default True
+        Defines the level ordering for the concatenation,
+        if true, acscends from level 0 onwards, if False,
+        reverses the order. Ignored if `level_order' is
+        provided.
+    level_order: optional, list of int, default None
+        If provided, specifies the specific level ordering
+        for the concatenation.
 
     Returns:
     --------
     list of str
 
     """
+    # get the level values
     num_levels = df.columns.nlevels
     to_zip = [list(df.columns.get_level_values(i)) for i in range(0, num_levels)]
+
+    # re-order level if desired
+    if level_order is not None:
+        to_zip = [to_zip[i] for i in level_order]
+
+    elif not ascending:
+        to_zip.reverse()
+
+    # return the concatenated column names
     return list(map(sep.join, zip(*to_zip)))
