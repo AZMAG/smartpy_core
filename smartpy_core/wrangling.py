@@ -1108,7 +1108,7 @@ def parse_dict_items(s, label_col, val_col):
 
 
 
-def collapse_multi_cols(df, sep='_', ascending=True, level_order=None):
+def collapse_multi_cols(df, sep='_', ascending=True, levels=None, prefix=None):
     """
     Given a pandas data frame w/ a multi-columns index,
     returns a list of columns names such that each level
@@ -1133,25 +1133,52 @@ def collapse_multi_cols(df, sep='_', ascending=True, level_order=None):
         if true, acscends from level 0 onwards, if False,
         reverses the order. Ignored if `level_order' is
         provided.
-    level_order: optional, list of int, default None
+    levels: optional, list of int or list of tuples, default None
         If provided, specifies the specific level ordering
-        for the concatenation.
+        for the concatenation. If tuples are provided, the 1st item
+        is an int specifying the level order and the 2nd item the prefix
+        to apply to that level. A mix of ints and tuples can be provided.
 
-    Returns:
-    --------
-    list of str
+        Examples:
+            # specify specific level ordering
+            collapse_multi_cols(df, level=[2, 1, 0])
+
+            # specify level ordering w/ prefixes
+            collapse_multi_cols(df, level=[(2, 'hola'), (1 'amigo'), (0, 'bueno')])
+
+            # only specify prefixes for some levels
+            collapse_multi_cols(df, level=[2, (1 'amigo'), 0])
+
+    prefix: optional, str
+        Optional prefix to apply to each column. Useful for situations
+        where the first level contains numeric values. If a str, applies prefix
+        to the first level.
 
     """
     # get the level values
     num_levels = df.columns.nlevels
-    to_zip = [list(df.columns.get_level_values(i)) for i in range(0, num_levels)]
+    to_zip = [list(df.columns.get_level_values(i).astype(str)) for i in range(0, num_levels)]
 
-    # re-order level if desired
-    if level_order is not None:
-        to_zip = [to_zip[i] for i in level_order]
+    # re-order levels if desired
+    if levels is not None:
+        # specific levels
+        temp = []
+        for level in levels:
+            if isinstance(level, int):
+                temp.append(to_zip[level])
+            elif isinstance(level, tuple):
+                curr_idx = level[0]
+                curr_pre = level[1]
+                temp.append(['{}{}{}'.format(curr_pre, sep, c ) for c in to_zip[curr_idx]])
+        to_zip = temp
 
     elif not ascending:
+        # just sort the levels descending
         to_zip.reverse()
+
+    # if provided, apply column prefixes to all levels
+    if prefix is not None:
+        to_zip.insert(0, list(np.repeat(prefix, len(df.columns))))
 
     # return the concatenated column names
     return list(map(sep.join, zip(*to_zip)))
