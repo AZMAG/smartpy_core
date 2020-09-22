@@ -1141,13 +1141,13 @@ def collapse_multi_cols(df, sep='_', ascending=True, levels=None, prefix=None):
 
         Examples:
             # specify specific level ordering
-            collapse_multi_cols(df, level=[2, 1, 0])
+            collapse_multi_cols(df, levels=[2, 1, 0])
 
             # specify level ordering w/ prefixes
-            collapse_multi_cols(df, level=[(2, 'hola'), (1 'amigo'), (0, 'bueno')])
+            collapse_multi_cols(df, levels=[(2, 'hola'), (1 'amigo'), (0, 'bueno')])
 
             # only specify prefixes for some levels
-            collapse_multi_cols(df, level=[2, (1 'amigo'), 0])
+            collapse_multi_cols(df, levels=[2, (1 'amigo'), 0])
 
     prefix: optional, str
         Optional prefix to apply to each column. Useful for situations
