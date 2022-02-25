@@ -18,6 +18,12 @@ class cache(object):
     function arguments, otherwise a copy of the function results
     will be returned.
 
+
+    *** Note: this only works for functions with simple, non-mutable,
+    arguments. So if any of the args are pandas objects this will
+    fail and report and error. TODO: work out a solution to this. ***
+
+
     Sample usage:
     -------------
     # cache a func
