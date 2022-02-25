@@ -6,8 +6,52 @@ data wrangling operations with Pandas and Numpy.
 
 import time
 import random
+import copy
 import numpy as np
 import pandas as pd
+
+
+class cache(object):
+    """
+    Simple decorator for caching/memoizing function results.
+    The function wil only be re-evaluated when there are unqiue
+    function arguments, otherwise a copy of the function results
+    will be returned.
+
+    Sample usage:
+    -------------
+    # cache a func
+    @cache
+    def do_this(a, b):
+        return a + b
+
+    # clear a cached result
+    do_this.clear(10, 20)
+
+    # clear all cached results
+    do_this.clear()
+
+    """
+    def __init__(self, func):
+        self.func = func
+        self.cached = {}
+
+    def __call__(self, *args):
+        if not args in self.cached:
+            self.cached[args] = self.func(*args)
+        return copy.deepcopy(self.cached[args])
+
+    def clear(self, *args):
+        """
+        Clears out the cache. If args are passed then
+        only that result will be cached, otherwise
+        all results will be cleared.
+
+        """
+        if len(args) > 1:
+            del self.cached[args]
+        else:
+            self.cached = {}
 
 
 class Seeded(object):
