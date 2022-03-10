@@ -7,8 +7,86 @@ data wrangling operations with Pandas and Numpy.
 import time
 import random
 import copy
+import json
+import yaml
 import numpy as np
 import pandas as pd
+
+import inspect
+try:
+    from inspect import getfullargspec as getargspec
+except ImportError:
+    from inspect import getargspec
+
+
+def get_func_args(func):
+    """
+    Returns a function's argument names and default values. These are used by other
+    functions to establish dependencies and collect inputs.
+
+    Parameters:
+    -----------
+    func: callable
+        The function/callable to inspect.
+
+    Returns:
+    --------
+    arg_names: list of str
+        List of argument names.
+    default_kwargs:
+        Dictionary of default values. Keyed by the argument name.
+
+    """
+
+    # get function arguments
+    spec = getargspec(func)
+    args = spec.args
+    defaults = spec.defaults
+
+    # get keyword args for the function's default values
+    default_kwargs = {}
+    if defaults is not None:
+        kw_start_idx = len(args) - len(defaults)
+        default_kwargs = dict(zip([key for key in args[kw_start_idx:]], list(defaults)))
+
+    return args, default_kwargs
+
+
+def get_arg_map(func, *args, **kwargs):
+    """
+    Returns a dict of argument names and corresponding values.
+
+    Parameters:
+    -----------
+    func: callable
+        The target function
+    *args: list
+        List of poitional arguments submited to the funciton.
+    **kwargs: dict
+        Dict of keyword arguments submitted to the function.
+
+    Returns:
+    --------
+    dict
+
+    """
+    # get the function's input arguments and any default values
+    func_args, func_defaults = get_func_args(func)
+    arg_map = {a: None for a in func_args}
+
+    # first use defaults
+    for k, v in func_defaults.items():
+        arg_map[k] = v
+
+    # then positional
+    for i in range(0, len(args)):
+        arg_map[func_args[i]] = args[i]
+
+    # finally keywords
+    for k, v in kwargs.items():
+        arg_map[k] = v
+
+    return arg_map
 
 
 class cache(object):
@@ -42,20 +120,31 @@ class cache(object):
         self.func = func
         self.cached = {}
 
-    def __call__(self, *args):
-        if not args in self.cached:
-            self.cached[args] = self.func(*args)
-        return copy.deepcopy(self.cached[args])
+    def __call__(self, *args, **kwargs):
+        # get dict of argument names and values
+        arg_map = get_arg_map(self.func, *args, **kwargs)
 
-    def clear(self, *args):
+        # convert to yaml for the key
+        key = yaml.dump(arg_map)
+
+        # evaluate the func if necessary
+        if not key in self.cached:
+            self.cached[key] = self.func(**arg_map)
+
+        return copy.deepcopy(self.cached[key])
+
+    def clear(self, *args, **kwargs):
         """
-        Clears out the cache. If args are passed then
-        only that result will be cached, otherwise
+        Clears out the cache. If keyowrd args are passed then
+        only that result will be cleared, otherwise
         all results will be cleared.
 
         """
-        if len(args) > 1:
-            del self.cached[args]
+        if len(args) > 0 or len(kwargs) > 0:
+            arg_map = get_arg_map(self.func, *args, **kwargs)
+            key = yaml.dump(arg_map)
+            if key in self.cached:
+                del self.cached[key]
         else:
             self.cached = {}
 
