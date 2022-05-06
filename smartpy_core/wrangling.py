@@ -19,6 +19,30 @@ except ImportError:
     from inspect import getargspec
 
 
+def remote_csv_to_pandas(zip_url, csv_name, *args, **kwargs):
+    """
+    Reads a csv into a pandas data frame via http for
+    a zipped file that has multiple files.
+
+    Parameters:
+    ----------
+    zip_url: str
+        URL for the zip file to read from
+    csv_name: str
+        Name of the csv file w/in the zip
+    *args: optional
+        Additional args to pass to the `pd.read_csv` method
+    **kwargs: optionl
+        Additional keyword args to pass to the `pd.read_csv` method
+
+    """
+    r = urllib.request.urlopen(zip_url)
+    with ZipFile(io.BytesIO(r.read())) as z:
+        data = z.read(csv_name)
+    df = pd.read_csv(io.BytesIO(data), *args, **kwargs)
+    return df
+
+
 def get_func_args(func):
     """
     Returns a function's argument names and default values. These are used by other
