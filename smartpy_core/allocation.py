@@ -146,7 +146,7 @@ def get_constrained_allocation(amount, weights, capacities):
     return get_rounded(amount, a)
 
 
-def get_segmented_allocation(amounts, target_weights, target_segments, do_round=True):
+def get_segmented_allocation(amounts, target_weights, target_segments, do_round=True, fill_nulls=True):
     """
     Allocates multiple amounts to target rows using weights. This
     allocation is un-constrained. This assumes there is a 1:m relationship
@@ -162,6 +162,9 @@ def get_segmented_allocation(amounts, target_weights, target_segments, do_round=
         Foreign key link to the amounts index. Should be aligned to the weights series.
     do_round: optional, bool, default True
         Indicates if allocated amount will be rounded.
+    fill_nulls: optional, bool, default True
+        If True, missing amounts will be converted to 0.
+        If False, missing amount will be nan.
 
     Returns:
     --------
@@ -200,7 +203,12 @@ def get_segmented_allocation(amounts, target_weights, target_segments, do_round=
     else:
         rounded = unrounded
 
-    return rounded.reindex(target_weights.index).fillna(0)
+    #return rounded.reindex(target_weights.index).fillna(0)
+    # maybe we should the caller decide what they want to do w/ nulls?
+    if fill_nulls:
+        return rounded.reindex(target_weights.index).fillna(0)
+    else:
+        return rounded.reindex(target_weights.index)
 
 
 def get_segmented_allocation_mn(amounts, amount_col, targets, weight_col, segment_cols):
