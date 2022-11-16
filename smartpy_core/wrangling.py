@@ -276,11 +276,10 @@ class HowLong():
 
     """
     def __enter__(self):
-        self.start = time.clock()
+        self.start = time.perf_counter()
 
     def __exit__(self, *args):
-        e = time.clock()
-        self.start
+        e = time.perf_counter()
         delta = e - self.start
         if delta <= 60:
             # minute or less
