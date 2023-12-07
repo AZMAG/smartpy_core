@@ -39,6 +39,31 @@ def get_db_connection(server, db, driver='SQL Server'):
     return pyodbc.connect(conn_string.format(driver, server, db))
 
 
+class SqlServerConn(object):
+    """
+    Context manager for working w/ a sql server connection.
+    
+    Parameters:
+    -----------
+    server: string
+        Name of the SQL Server instance.
+    db: string:
+        Name of the database.
+    
+    """
+
+    def __init__(self, db_server, db):
+        self.db_server = db_server
+        self.db = db
+
+    def __enter__(self):
+        self.conn = get_db_connection(self.db_server, self.db)
+        return self
+    
+    def __exit__(self, *args):
+        self.conn.close()
+
+
 def sql_to_pandas(query, server, db, index_fld=None):
     """
     Queries and loads data from a SQL Server table into a data frame.
