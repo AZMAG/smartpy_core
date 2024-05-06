@@ -894,7 +894,7 @@ def hierarchy_aggregate_groups(target_df, source_df, agg_col, segment_cols, grou
             seg = [segment_cols[i], group_col]
 
         # do the aggregation
-        curr_agg = source_df.groupby(seg).aggregate(agg_f)
+        curr_agg = source_df.groupby(seg)[[agg_col]].aggregate(agg_f)
 
         if i == 0:
             # 1st iteration, take all the results
@@ -949,7 +949,7 @@ def hierarchy_pivot(target_df, source_df, agg_col, segment_cols, group_col, agg_
         agg_f)
 
     # pivot the results
-    piv = ha.pivot(segment_cols[0], group_col, agg_col)
+    piv = ha.pivot(index=segment_cols[0], columns=group_col, values=agg_col)
 
     # rename if desired
     rename_columns(piv, prefix, suffix)
