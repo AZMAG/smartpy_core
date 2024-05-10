@@ -1,10 +1,15 @@
 """
 Contains IO operations for SQL Server.
 
+Note: this was updated on 05.10.2024 to make greater use
+of sqlalchemy engine and limit the use of pyodbc.connect. 
+
+Some references: 
+https://docs.sqlalchemy.org/en/13/core/connections.html
+
 """
 
 import pandas as pd
-import pyodbc
 import sqlalchemy
 
 try:
@@ -13,9 +18,14 @@ except ImportError:
     from urllib import quote_plus # py27
 
 
-def get_db_connection(server, db, driver='SQL Server'):
+# sql alchemy engines are intended to be application level
+# ...so we'll maintain a global list
+_engines = {}
+
+
+def get_engine(server, db):
     """
-    Utility method to get a database connection.
+    Returns a sql alchemy engine for sql server.
 
     Parameters:
     -----------
@@ -23,45 +33,90 @@ def get_db_connection(server, db, driver='SQL Server'):
         Name of the SQL Server instance.
     db: string:
         Name of the database.
-    driver: string, optional defualt SQL Server
-        Driver for connection.
-
-    Returns:
-    --------
-    Connection
 
     """
-    conn_string = """DRIVER={};
-                     SERVER={};
-                     DATABASE={};
-                     Trusted_Connection=yes"""
-
-    return pyodbc.connect(conn_string.format(driver, server, db))
+    key = (server, db)
+    if key not in _engines:
+        db_para = 'DRIVER={SQL SERVER};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
+        conn_string = quote_plus(db_para)
+        _engines[key] = sqlalchemy.create_engine('mssql+pyodbc:///?odbc_connect={}'.format(conn_string))
+    return _engines[key]
 
 
 class SqlServerConn(object):
     """
-    Context manager for working w/ a sql server connection.
-    
+    *** DEPRECATED**
+    Use 
+        `sql_execute` method to execute sql statements.
+        `get_records` method to query a recordset into a dict. 
+        `sql_to_pandas` method to query into a datafrmae.
+        `pandas_to_sql` method to write a dataframe to a sql table.
+    """
+
+    def __init__(self, server, db):
+        raise Exception( 
+            """
+            *** DEPRECATED**
+            Use 
+                `sql_execute` method to execute sql statements.
+                `get_records` method to query a recordset into a dict. 
+                `sql_to_pandas` method to query into a datafrmae.
+                `pandas_to_sql` method to write a dataframe to a sql table.
+            """
+        )
+
+
+def sql_execute(statements, server, db):
+    """
+    Executes one or more sql statements.
+
     Parameters:
     -----------
+    statements: str or list of str
+        SQL statement(s) to execute.
     server: string
         Name of the SQL Server instance.
     db: string:
         Name of the database.
     
+    Sample usage:
+    -------------
+    sql_execute(
+        'select mpa, median_age into __blah_blah from _scott_temp_median_test_mpa', 
+        'sql', 
+        'ACS2022'
+    )
     """
+    engine = get_engine(server, db)
+    if not isinstance(statements, list):
+        statements = [statements]
+    with engine.begin() as c:
+        for s in statements:
+            c.execute(s)
 
-    def __init__(self, db_server, db):
-        self.db_server = db_server
-        self.db = db
 
-    def __enter__(self):
-        self.conn = get_db_connection(self.db_server, self.db)
-        return self
+def get_records(query, server, db):
+    """
+    Returns a recordset for the provided query. 
+
+    Parameters:
+    -----------
+    query: str
+        SQL query to apply.
+    server: string
+        Name of the SQL Server instance.
+    db: string:
+        Name of the database.
+        
+    Returns:
+    -------
+    list of dictionaries, each dictionary 
+    represents a row w/ the keys the column names.
     
-    def __exit__(self, *args):
-        self.conn.close()
+    """
+    engine = get_engine(server, db)
+    with engine.connect() as c:
+        return c.execute(query).mappings().all()
 
 
 def sql_to_pandas(query, server, db, index_fld=None):
@@ -84,10 +139,8 @@ def sql_to_pandas(query, server, db, index_fld=None):
     pandas.DataFrame
 
     """
-    conn = get_db_connection(server, db)
-    df = pd.read_sql(query, conn, index_fld)
-    conn.close()
-    return df
+    engine = get_engine(server, db)
+    return pd.read_sql(query, engine, index_fld)
 
 
 def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists='fail', chunksize=50000, dtypes=None):
@@ -121,12 +174,7 @@ def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists
         see: https://docs.sqlalchemy.org/en/13/core/type_basics.html
 
     """
-    # get the sql connection
-    db_para = 'DRIVER={SQL SERVER};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
-    conn_string = quote_plus(db_para)
-    engine = sqlalchemy.create_engine(
-        'mssql+pyodbc:///?odbc_connect={}'.format(conn_string)
-    )
+    engine = get_engine(server, db)
 
     @sqlalchemy.event.listens_for(engine, "before_cursor_execute")
     def receive_before_cursor_execute(conn, cursor, statement, params, context, executemany):
