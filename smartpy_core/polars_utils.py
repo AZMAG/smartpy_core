@@ -202,7 +202,7 @@ class DataFrameUtils(object):
 #######################
 
 
-def shuffle(df: pl.LazyFrame | pl.DataFrame, w_col: str=None) -> pl.LazyFrame | pl.DataFrame:
+def shuffle(df: pl.LazyFrame | pl.DataFrame, w_col: str=None, rand_col: str=None) -> pl.LazyFrame | pl.DataFrame:
     """
     Shuffles a frame, optionally using weights.
     
@@ -212,18 +212,28 @@ def shuffle(df: pl.LazyFrame | pl.DataFrame, w_col: str=None) -> pl.LazyFrame | 
         The data frame to shuffle.
     w_col: str
         Name of the weights column.
-
+    rand_col: str, optional, default None
+        If provided, names the temporary random column
+        and retains it in the results.
+        If None, the random colum is dropped in the returned result
+        
     """
-    df = df.smart.with_rand('__r')
+    if rand_col is None:
+        rand_col = '__r'
+        drop_rand = True
+    else:
+        drop_rand = False
+
+    df = df.smart.with_rand(rand_col)
     if w_col is not None:
         df = df.with_columns(
-           __r=pl.col('__r') ** (1 / pl.col(w_col))
+           (pl.col(rand_col) ** (1 / pl.col(w_col))).alias(rand_col)
         )
-    return (
-        df
-        .sort('__r', descending=True)
-        .select(pl.exclude('__r'))
-    )
+    
+    df = df.sort(rand_col, descending=True)
+    if drop_rand:
+        df = df.select(pl.exclude(rand_col))
+    return df
 
 
 def segmented_sample(
@@ -301,13 +311,13 @@ def segmented_sample_no_replace(
     df_cols = df.collect_schema().names()
 
     # randomize
-    df = shuffle(df, weights_col)
+    df = shuffle(df, weights_col, '__r')
     
     # get the sample by taking the top n rows from each segment
     return (
         df
         .join(counts, on=segment_col, how='left')
-        .with_columns(__rank=pl.cum_count('job_id').over(segment_col))
+        .with_columns(__rank=pl.col('__r').cum_count().over(segment_col))
         .filter(pl.col('__rank') <= pl.col(counts_col))
         .select(df_cols)
     )
@@ -342,16 +352,20 @@ def segmented_sample_with_replace(
     # columns we'll retain in the result
     cols = df.collect_schema().names()
 
+    # work off segments as a list
+    if not isinstance(segment_col, list):
+        segment_col = [segment_col]
+
     # explode so we have a random for each count item
     idx_col = '__idx'
     repeat_col = '__repeat'
     rand_col = '__r'
     counts_explode = (
         counts
+        .select(counts_col, *segment_col)
         .with_row_index(idx_col)
-        .select(
-            pl.all(),
-            pl.col(idx_col).repeat_by(counts_col).alias(repeat_col)
+        .with_columns(
+             pl.col(idx_col).repeat_by(counts_col).alias(repeat_col)
         )
         .explode(repeat_col)
         .smart.with_rand(rand_col)
