@@ -29,7 +29,7 @@ def np_rand(s: pl.Series) -> pl.Series:
     )
 
 
-def stochastic_round(s: pl.Series, out_dtype:pl.DataType=pl.Int64) -> pl.Series:
+def stochastic_round(s: pl.Series, out_dtype: pl.DataType=pl.Int64) -> pl.Series:
     """
     Rounds a float randomly proportional to the remainder.
 
@@ -42,8 +42,6 @@ def stochastic_round(s: pl.Series, out_dtype:pl.DataType=pl.Int64) -> pl.Series:
     r = pl.Series(np.random.rand(s.len()))
     frac = s % 1
     return (s.floor() + (frac > r).cast(pl.Int8)).cast(out_dtype)
-
-
 
 
 #########################
@@ -117,6 +115,60 @@ class LazyFrameUtils(object):
         Returns a series containing values from `numpy.random.rand`.
 
         """
+        if name is None:
+            name = 'rand'
+        return pl.first().smart.rand().alias(name)
+
+    def with_rand(self, name: str=None) -> pl.DataFrame:
+        """
+        Returns lazy frame appended with a column of `numpy.rand.rand`
+        values. 
+
+        Parameters:
+        -----------
+        str: name
+            Name to assign the column.
+
+        """
+        return self._ldf.with_columns(self.rand(name))
+
+    def shuffle(self, w_col: str=None) -> pl.LazyFrame:
+        """
+        Shuffles a lazy frame, optionally using weights.
+    
+        Parameters:
+        -----------
+        w_col: str, optional, default None
+            Name of the weights column.
+
+        """
+        return shuffle(self._ldf, w_col)
+
+    def sel(self, *args, **kwargs):
+        """
+        Custom select that...
+
+        """
+        pass
+
+
+@pl.api.register_dataframe_namespace('smart')
+class DataFrameUtils(object):
+    """
+    Custom operations that operate on a polars data frame.
+    Registered under the `smart` namespace.
+    
+    """
+    def __init__(self, df: pl.DataFrame):
+        self._df = df
+
+    def rand(self, name: str=None) -> pl.Series:
+        """
+        Returns a series containing values from `numpy.random.rand`.
+
+        """
+        if name is None:
+            name = 'rand'
         return pl.first().smart.rand().alias(name)
 
     def with_rand(self, name: str=None) -> pl.DataFrame:
@@ -130,14 +182,19 @@ class LazyFrameUtils(object):
             Name to assign the column.
 
         """
-        return self._ldf.with_columns(self.rand(name))
-
-    def sel(self, *args, **kwargs):
+        return self._df.with_columns(self.rand(name))
+    
+    def shuffle(self, w_col: str=None) -> pl.DataFrame:
         """
-        Custom select that...
+        Shuffles a data frame, optionally using weights.
+    
+        Parameters:
+        -----------
+        w_col: str, optional, default None
+            Name of the weights column.
 
         """
-        pass
+        return shuffle(self._df, w_col)
 
 
 #######################
@@ -145,12 +202,81 @@ class LazyFrameUtils(object):
 #######################
 
 
+def shuffle(df: pl.LazyFrame | pl.DataFrame, w_col: str=None) -> pl.LazyFrame | pl.DataFrame:
+    """
+    Shuffles a frame, optionally using weights.
+    
+    Parameters:
+    -----------
+    df: pl.LazyFrame or pl.DataFrame
+        The data frame to shuffle.
+    w_col: str
+        Name of the weights column.
+
+    """
+    df = df.smart.with_rand('__r')
+    if w_col is not None:
+        df = df.with_columns(
+           __r=pl.col('__r') ** (1 / pl.col(w_col))
+        )
+    return (
+        df
+        .sort('__r', descending=True)
+        .select(pl.exclude('__r'))
+    )
+
+
+def segmented_sample(
+        df: pl.LazyFrame | pl.DataFrame, 
+        counts: pl.LazyFrame | pl.DataFrame,
+        counts_col: str,
+        segment_col: str | list[str], 
+        replace: bool,
+        weights_col: str=None) -> pl.LazyFrame | pl.DataFrame:
+    """
+    Segmented sampling.
+
+    Parameters:
+    -----------
+    df:  pl.LazyFrame or pl.DataFrame
+        Data frame to sample from.
+    counts: pl.LazyFrame or pl.DataFrame
+        Data frame containing segments and counts.
+        Should match frame type (data or lazy) of the sample frame.
+    counts_col: str
+        Column in the counts data frame containing
+        the counts.
+    segment_col: str or list of str
+        Column(s) containing the segmentation. These
+        columns must exist in both data frames and 
+        the combination of column values should be unique.
+    replace: bool
+        If True, samples WITH replacement.
+        If False, samples WITHOUT replacement
+    weights_col: str, optional, default None
+        If provided, column to serve as weights. 
+
+    Returns:
+    --------
+    pl.LazyFrame or pl.DataFrame
+
+    """
+    if replace:
+        return segmented_sample_with_replace(
+            df, counts, counts_col, segment_col, weights_col
+        )
+    else:
+        return segmented_sample_no_replace(
+            df, counts, counts_col, segment_col, weights_col
+        )
+
+
 def segmented_sample_no_replace(
         df: pl.LazyFrame, 
         counts: pl.LazyFrame,
         counts_col: str,
         segment_col: str | list[str], 
-        weights_col:str=None) -> pl.LazyFrame:
+        weights_col: str=None) -> pl.LazyFrame:
     """
     Segmented sampling without replacement.
 
@@ -171,22 +297,19 @@ def segmented_sample_no_replace(
         If provided, column to serve as weights. 
 
     """
+    # retain the original schema
+    df_cols = df.collect_schema().names()
+
     # randomize
-    ran_col = '__r'
-    df = df.smart.with_rand(ran_col)
-    if weights_col is not None:
-       df = df.with_columns(
-          ran_col=pl.col(ran_col) ** (1 / pl.col(weights_col))
-        )
+    df = shuffle(df, weights_col)
     
     # get the sample by taking the top n rows from each segment
-    rank_col = '__rank'
     return (
         df
         .join(counts, on=segment_col, how='left')
-        .with_columns(pl.col(ran_col).rank().over(segment_col).alias(rank_col))
-        .filter(pl.col(rank_col) <= pl.col(counts_col))
-        .select(pl.exclude(counts_col, ran_col, rank_col))
+        .with_columns(__rank=pl.cum_count('job_id').over(segment_col))
+        .filter(pl.col('__rank') <= pl.col(counts_col))
+        .select(df_cols)
     )
 
 
