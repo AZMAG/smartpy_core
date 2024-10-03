@@ -383,3 +383,97 @@ def segmented_sample_with_replace(
         )
         .select(cols)
     )
+
+
+#####################
+# transition
+#####################
+
+
+def get_starting_id(df: pl.LazyFrame | pl.DataFrame, col: str) -> int:
+    """
+    Returns a starting ID that ensures unique-ness when adding
+    new rows.
+
+    Parameters:
+    -----------
+    df: pl.DataFrame or pl.LazyFrame
+        Frame to add to.
+    col: str
+        Name of ID column in the frame.
+
+    Returns:
+    --------
+    int
+    
+    """
+    if isinstance(df, pl.DataFrame):
+        return 1 + df[col].max()
+    elif isinstance(df, pl.LazyFrame):
+        return 1 + df.select(pl.col(col).max()).collect().item()
+    else:
+        raise ValueError("'df' must be pl.LazyFrame or pl.DataFrame")
+
+
+def transition_agents(targets,
+                      target_col,
+                      segment_cols,
+                      agents, 
+                      agent_id_col) -> pl.LazyFrame | pl.DataFrame:
+    """
+    In progress.
+
+    Simple transtion model, so far doesn't handle accounting column
+    or linked tables. 
+
+    So suitable for emp but not hh pop.
+
+    Also doesn't do the sampling threhold hierarchy stuff
+    but we don't really use that.
+
+    Also, what do we do with agents that fall outside the segmentation scheme in
+    the controls
+    ...by default in urbansim these are removed
+    ...right now this would be keeping them
+
+    """
+    # starting ID for adding new agents
+    starting_id = get_starting_id(agents, agent_id_col)
+
+    # determine the amounts we need to add/remove
+    amounts = (
+        targets
+        .join(
+            agents.group_by(segment_cols).agg(__cnt=pl.len()),
+            on=segment_cols,
+            how='left',
+        )
+        .with_columns(__diff=pl.col(target_col) - pl.col('__cnt'))
+    )
+
+    # add agents where the controls are lower than the existing count
+    adds = amounts.filter(pl.col('__diff') > 0)
+    added_agents = (
+        segmented_sample(
+            agents, adds, '__diff', segment_cols,True
+        )
+        .rename({agent_id_col: 'src_{}'.format(agent_id_col)})
+        .with_row_index(agent_id_col, starting_id)
+    )
+    
+    # remove agents where the controls are higher than the existing count
+    removals = (
+        amounts
+        .filter(pl.col('__diff') < 0)
+        .with_columns(__diff=pl.col('__diff').abs())
+    )
+    removed_agents = segmented_sample(agents, removals, '__diff', segment_cols, False)
+
+    # combine
+    return pl.concat(
+        [
+            agents.join(removed_agents, on=agent_id_col, how='anti'),
+            added_agents.select(agents.columns)
+        ],
+        how='vertical_relaxed'
+    )
