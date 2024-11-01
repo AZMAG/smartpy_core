@@ -399,6 +399,166 @@ def segmented_sample_with_replace(
     )
 
 
+def segmented_sampling_with_accounting_replace(
+        df: pl.LazyFrame, 
+        amounts: pl.LazyFrame,
+        accounting_col: str,
+        amount_col: str,
+        segment_col: str | list[str], 
+        weights_col:str=None,
+        max_iter: int=100,
+        debug: bool=False) -> pl.LazyFrame:
+    """
+    Performs segmented sampling while matching
+    prescribed accounting totals. Sample use case
+    is sampling households while controlas are
+    prescribed as population.
+
+    **WITH REPLACEMENT**
+
+    Parameters:
+    -----------
+    df: pl.LazyFrame
+        Data frame to sample from.
+    amounts: pl.LazyFrame
+        Data frame containing segments and amount/counts
+        i.e control totals.
+    accounting_col: str
+        Name of the column in sampling frame containing
+        amounts, e.g. persons.
+    counts_col: str
+        Column in the amounts data frame containing
+        the amounts to match.
+    segment_col: str or list of str
+        Column(s) containing the segmentation. These
+        columns must exist in both data frames and 
+        the combination of column values should be unique.
+    weights_col: str, optional, default None
+        If provided, column to serve as weights. 
+    max_iter: int, optional, default 100
+        Maximum number of sampling iterations. 
+    debug: bool, optional, default False
+        If True, prints a message of the whether or
+        not all amounts were matched exactly and the 
+        number of iterations it took. 
+        
+    """
+    # retain the original schema
+    df_cols = df.collect_schema().names()
+
+    # estimate avg accounting amount per sample (e.g. persons per household)
+    # ...we'll increase this by 5% to ensure we're sampling enough
+    per_sample = (
+        amounts
+        .join(
+            df.group_by(segment_col).agg(
+                pl.col(accounting_col).sum().alias('__accounting_sum'),
+                pl.col(accounting_col).len().alias('__row_cnt')
+            ),
+            on=segment_col,
+            how='left'
+        )
+        .with_columns(
+            __per_sample=(1.05) * (pl.col('__accounting_sum') / pl.col('__row_cnt'))
+        )
+    )
+
+    # track the remaining amount needed
+    remaining = per_sample.select(
+        pl.col(amount_col).alias('__remaining'),
+        pl.col('__per_sample'),
+        *segment_col
+    )
+
+    # iteratively sample until we reach the control total
+    to_concat = []
+    done = False
+
+    for i in range(0, max_iter):
+        # break out of the loop if we've matched all amounts
+        if done:
+            print('finished at {} iterations'.format(i))
+            break
+        
+        # number of samples to draw in this iteration
+        num_samples = (
+            remaining
+            .with_columns(
+                __num_samples = (pl.col('__remaining') / pl.col('__per_sample')).ceil()
+            )
+        )
+
+        # get current sample
+        curr_sample = (
+            # get the sample
+            segmented_sample(
+                df,
+                num_samples,
+                '__num_samples',
+                segment_col,
+                True,
+                weights_col
+            )
+            # keep those not exceeding the amount total
+            .with_columns(_cs=pl.col(accounting_col).cum_sum().over(segment_col))
+            .join(
+                remaining.select('__remaining', *segment_col),
+                on=segment_col
+            )
+            .filter(pl.col('_cs') <= pl.col('__remaining'))
+        )
+
+        if not curr_sample.is_empty():
+            to_concat.append(curr_sample)
+        
+            # update remaining amounts
+            remaining = (
+                remaining
+                .join(
+                    curr_sample
+                        .group_by(segment_col)
+                        .agg(pl.col(accounting_col).sum().alias('__sampled_amount')
+                    ),
+                    on=segment_col, 
+                    how='left'
+                )
+                .fill_null(0)
+                .select(
+                    (pl.col('__remaining') - pl.col('__sampled_amount')).alias('__remaining'),
+                    pl.col('__per_sample'),
+                    *segment_col
+                )
+                .filter(pl.col('__remaining') > 0)
+            )
+            
+            # are we done yet?
+            if remaining.is_empty():
+                done = True
+                break
+
+    # finish up
+    # TODO: convert this to logging
+    if debug:
+        if done:
+            print('finished in {} iterations'.format(i))
+        else:
+            print('**did not match all amouns exactly**')
+            print(remaining)
+
+    return (
+        pl.concat(to_concat, how='vertical_relaxed')
+        .select(df_cols)
+    )
+
+
+def segmented_sampling_with_accounting_no_replace():
+    """
+    TODO...
+
+    """
+    pass
+
+
 #####################
 # transition
 #####################
