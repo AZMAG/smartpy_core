@@ -608,7 +608,7 @@ def segmented_sampling_with_accounting_with_replace(
         amount_col: str,
         segment_col: str | list[str], 
         weights_col:str=None,
-        max_iter: int=100,
+        max_iterations: int=100,
         debug: bool=False) -> pl.LazyFrame:
     """
     Performs segmented sampling while matching
@@ -627,8 +627,8 @@ def segmented_sampling_with_accounting_with_replace(
         i.e control totals.
     accounting_col: str
         Name of the column in sampling frame containing
-        amounts, e.g. persons.
-    counts_col: str
+        accounting amounts, e.g. persons.
+    amounts_col: str
         Column in the amounts data frame containing
         the amounts to match.
     segment_col: str or list of str
@@ -637,7 +637,7 @@ def segmented_sampling_with_accounting_with_replace(
         the combination of column values should be unique.
     weights_col: str, optional, default None
         If provided, column to serve as weights. 
-    max_iter: int, optional, default 100
+    max_iterations: int, optional, default 100
         Maximum number of sampling iterations. 
     debug: bool, optional, default False
         If True, prints a message of the whether or
@@ -645,112 +645,70 @@ def segmented_sampling_with_accounting_with_replace(
         number of iterations it took. 
         
     """
-    # retain the original schema
-    df_cols = df.collect_schema().names()
-
-    # estimate avg accounting amount per sample (e.g. persons per household)
-    # ...we'll increase this by 5% to ensure we're sampling enough
-    per_sample = (
-        amounts
-        .join(
-            df.group_by(segment_col).agg(
-                pl.col(accounting_col).sum().alias('__accounting_sum'),
-                pl.col(accounting_col).len().alias('__row_cnt')
-            ),
-            on=segment_col,
-            how='left'
-        )
-        .with_columns(
-            __per_sample=(1.05) * (pl.col('__accounting_sum') / pl.col('__row_cnt'))
-        )
-    )
-
-    # track the remaining amount needed
-    remaining = per_sample.select(
-        pl.col(amount_col).alias('__remaining'),
-        pl.col('__per_sample'),
-        *segment_col
-    )
-
-    # iteratively sample until we reach the control total
-    to_concat = []
     done = False
+    pct_over = 1.0
+    pct_over_increment = 0.05
+    df_for_sample_size = df
 
-    for i in range(0, max_iter):
-        # break out of the loop if we've matched all amounts
-        if done:
-            print('finished at {} iterations'.format(i))
+    for i in range(max_iterations):
+        # as we have more iterations sample more
+        pct_over += pct_over_increment
+       
+        # estimate avg accounting amount per sample (e.g. persons per household)
+        amounts_j = (
+            amounts
+            .select(
+                pl.col(amount_col).alias('__target_amount'),
+                *segment_col
+            )
+            .join(
+                df_for_sample_size.group_by(segment_col).agg(
+                    pl.col(accounting_col).sum().alias('__accounting_sum'),
+                    pl.col(accounting_col).len().alias('__row_cnt')
+                ),
+                on=segment_col,
+                how='left'
+            )
+            .with_columns(
+                __per_sample=pl.col('__accounting_sum') / pl.col('__row_cnt')
+            )
+            .with_columns(
+                __num_samples=(pct_over * (pl.col('__target_amount') / pl.col('__per_sample'))).ceil()
+            )
+        )
+
+        # initial random sample
+        sample = segmented_sample(
+            df,
+            amounts_j,
+            '__num_samples',
+            segment_col,
+            True,
+            weights_col
+        )
+
+        # if sampling with weights, need to update amount per sample
+        df_for_sample_size = sample
+
+        # refine the sample to attempt to match the amount exactly 
+        result, result_status = segmented_cum_choose(
+            sample, amounts_j, accounting_col, '__target_amount', segment_col
+        )
+
+        # are we done yet?
+        if result_status == True:
+            done = True
             break
         
-        # number of samples to draw in this iteration
-        num_samples = (
-            remaining
-            .with_columns(
-                __num_samples = (pl.col('__remaining') / pl.col('__per_sample')).ceil()
-            )
-        )
-
-        # get current sample
-        curr_sample = (
-            # get the sample
-            segmented_sample(
-                df,
-                num_samples,
-                '__num_samples',
-                segment_col,
-                True,
-                weights_col
-            )
-            # keep those not exceeding the amount total
-            .with_columns(_cs=pl.col(accounting_col).cum_sum().over(segment_col))
-            .join(
-                remaining.select('__remaining', *segment_col),
-                on=segment_col
-            )
-            .filter(pl.col('_cs') <= pl.col('__remaining'))
-        )
-
-        if not curr_sample.is_empty():
-            to_concat.append(curr_sample)
-        
-            # update remaining amounts
-            remaining = (
-                remaining
-                .join(
-                    curr_sample
-                        .group_by(segment_col)
-                        .agg(pl.col(accounting_col).sum().alias('__sampled_amount')
-                    ),
-                    on=segment_col, 
-                    how='left'
-                )
-                .fill_null(0)
-                .select(
-                    (pl.col('__remaining') - pl.col('__sampled_amount')).alias('__remaining'),
-                    pl.col('__per_sample'),
-                    *segment_col
-                )
-                .filter(pl.col('__remaining') > 0)
-            )
-            
-            # are we done yet?
-            if remaining.is_empty():
-                done = True
-                break
-
     # finish up
     # TODO: convert this to logging
     if debug:
         if done:
             print('finished in {} iterations'.format(i))
         else:
-            print('**did not match all amouns exactly**')
-            print(remaining)
-
-    return (
-        pl.concat(to_concat, how='vertical_relaxed')
-        .select(df_cols)
-    )
+            print('**did not match all amounts exactly**')
+    
+    return result
 
 
 def segmented_sampling_with_accounting_no_replace(
@@ -759,7 +717,9 @@ def segmented_sampling_with_accounting_no_replace(
         accounting_col: str,
         amount_col: str,
         segment_col: str | list[str], 
-        weights_col:str=None) -> pl.LazyFrame:
+        weights_col:str=None,
+        max_iterations: int=100,
+        debug: bool=False) -> pl.LazyFrame:
     """
     Performs segmented sampling while matching
     prescribed accounting totals. Sample use case
@@ -777,8 +737,8 @@ def segmented_sampling_with_accounting_no_replace(
         i.e control totals.
     accounting_col: str
         Name of the column in sampling frame containing
-        amounts, e.g. persons.
-    counts_col: str
+        accounting amounts, e.g. persons.
+    amount_col: str
         Column in the amounts data frame containing
         the amounts to match.
     segment_col: str or list of str
@@ -787,7 +747,7 @@ def segmented_sampling_with_accounting_no_replace(
         the combination of column values should be unique.
     weights_col: str, optional, default None
         If provided, column to serve as weights. 
-    max_iter: int, optional, default 100
+    max_iterations: int, optional, default 100
         Maximum number of sampling iterations. 
     debug: bool, optional, default False
         If True, prints a message of the whether or
@@ -795,7 +755,31 @@ def segmented_sampling_with_accounting_no_replace(
         number of iterations it took. 
         
     """
-    pass
+    done = False
+    for i in range(max_iterations):
+        # randomize
+        df = shuffle(df, weights_col)
+
+        # attempt to choose the top rows
+        # statisfying the cumulative amounts
+        result, result_status = segmented_cum_choose(
+            df, amounts, accounting_col, amount_col, segment_col
+        )
+
+        # are we done yet?
+        if result_status == True:
+            done = True
+            break
+        
+    # finish up
+    # TODO: convert this to logging
+    if debug:
+        if done:
+            print('finished in {} iterations'.format(i))
+        else:
+            print('**did not match all amounts exactly**')
+    
+    return result
 
 
 #####################
