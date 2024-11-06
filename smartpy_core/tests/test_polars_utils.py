@@ -70,3 +70,111 @@ def test_segmented_sampling_with_replace():
         .filter(pl.col('p_diff') > tolerance)
     ).collect()
     assert compare.height == 0
+
+
+def test_segmented_cum_choose():
+
+    # sample amounts
+    amounts_df = pl.DataFrame({
+        'grp': ['purple', 'pink'],
+        'amount': [5, 10]
+    })
+
+    # sample df to test with
+    test_df = pl.DataFrame({
+        'grp': ['purple', 'purple', 'purple', 'purple', 'pink', 'pink', 'pink', 'pink', 'pink'],
+        'amount': [4, 3, 2, 1, 5, 3, 3, 2, 3]
+    })
+
+    # test 1, using 'exact' option
+    test1_res, test1_status = segmented_cum_choose(
+        test_df,
+        amounts_df,
+        'amount',
+        'amount',
+        'grp',
+    )
+    assert test1_res['amount'].to_list() == [4, 5, 3, 1, 2]
+    assert test1_status == True
+
+    # ...test as lazy
+    test1_res, test1_status = segmented_cum_choose(
+        test_df.lazy(),
+        amounts_df.lazy(),
+        'amount',
+        'amount',
+        'grp',
+    )
+    assert test1_res.collect()['amount'].to_list() == [4, 5, 3, 1, 2]
+    assert test1_status == True
+
+    # test 2, using 'left' option
+    test2 = segmented_cum_choose(
+        test_df,
+        amounts_df,
+        'amount',
+        'amount',
+        'grp',
+        'left'
+    )
+    assert test2['amount'].to_list() == [4, 5, 3]
+
+    # ...as lazy
+    test2 = segmented_cum_choose(
+        test_df.lazy(),
+        amounts_df.lazy(),
+        'amount',
+        'amount',
+        'grp',
+        'left'
+    )
+    assert test2.collect()['amount'].to_list() == [4, 5, 3]
+
+    # test 3, using 'right' option
+    test3 = segmented_cum_choose(
+        test_df,
+        amounts_df,
+        'amount',
+        'amount',
+        ['grp'],
+        'right'
+        
+    )
+    assert test3['amount'].to_list() == [4, 3, 5, 3, 3]
+
+    # ...as lazy
+    test3 = segmented_cum_choose(
+        test_df.lazy(),
+        amounts_df.lazy(),
+        'amount',
+        'amount',
+        ['grp'],
+        'right'
+        
+    )
+    assert test3.collect()['amount'].to_list() == [4, 3, 5, 3, 3]
+
+    # test 3, using 'right' option
+    # ...and updating the amount column
+    test3a = segmented_cum_choose(
+        test_df,
+        amounts_df,
+        'amount',
+        'amount',
+        'grp',
+        'right',
+        'amount'
+    )
+    assert test3a['amount'].to_list() == [4, 1, 5, 3, 2]
+
+    # ...as lazy
+    test3a = segmented_cum_choose(
+        test_df.lazy(),
+        amounts_df.lazy(),
+        'amount',
+        'amount',
+        'grp',
+        'right',
+        'amount'
+    )
+    assert test3a.collect()['amount'].to_list() == [4, 1, 5, 3, 2]

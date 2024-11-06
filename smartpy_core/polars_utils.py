@@ -7,6 +7,29 @@ import pandas as pd
 import polars as pl
 
 
+def is_empty(df: pl.DataFrame | pl.LazyFrame) -> bool:
+    """
+    Generic method for determining if a polars
+    DataFrame or LazyFrame has no rows. 
+
+    Parameters:
+    -----------
+    df: polars DataFrame or LazyFrame
+        Dataframe to check
+
+    Returns:
+    --------
+    bool
+
+    """
+    if isinstance(df, pl.DataFrame):
+        return df.is_empty()
+    elif isinstance(df, pl.LazyFrame):
+        return df.lazy().limit(1).collect().is_empty()
+    else: 
+        raise ValueError('df must be polars.DataFrame or polars.LazyFrame')
+
+
 #########################
 # funcs for map batches
 #########################
@@ -399,7 +422,186 @@ def segmented_sample_with_replace(
     )
 
 
-def segmented_sampling_with_accounting_replace(
+def segmented_cum_choose(
+        df: pl.DataFrame, 
+        amounts: pl.DataFrame,
+        accounting_col: str,
+        amount_col: str,
+        segment_col: str | list[str],
+        how: str='exact',
+        chosen_amount_col: str=None) -> pl.DataFrame:
+    """
+    For each segment, choose the top items
+    in the data frame whose `accounting column`
+    cumulative sum satisfies a target amount. 
+
+    Sample use case: given a data frame of housholds with 
+    a persons column, select the rows such that the sum of 
+    this column matches that provided target household
+    population.
+ 
+    This will follow the provided row ordering, so sort
+    before-hand to reflect priorities, probabilites, etc.
+
+    Parameters:
+    -----------
+    df: pl.DataFrame or pl.LazyFrame
+        Dataframe containing rows to choose.
+    amounts: pl.DataFrame or pl.LazyFrame.
+        Dataframe containing target amounts to match.
+    accounting_col: str
+        Name of the colum in the choices dataframe containing
+        accounting amounts we will sum, e.g. persons.
+    amount_col: 
+        Name of the the column in the amounts data frame
+        containing the target amount.
+    segment_col: str or list of str
+        Column(s) containing the segmentation. These
+        columns must exist in both data frames and 
+        the combination of column values should be unique.
+    how: str, optional, default `exact`.
+        If `exact` amounts will attempt to be matched exactly.
+        This means rows on the edge of the boundary will be
+        skipped over if exceeding the target.
+        If 'left' rows with amounts less than or equal to the target
+        will be returned.
+        If 'right' rows with amounts on the edge of the boundary
+        will be returned, even if exceeding the target amount.
+    chosen_amount_col: str, optional, default None
+        Only applicable if `how` is 'right'.
+        Name of column to add that has the portion of the 
+        amount that satisfies the target. 
+
+    Returns:
+    --------
+    result: pl.DataFrame or pl.LazyFrame
+        Data frame containing the schosen rows.
+    status: bool
+        Only returned if `how` is 'exact'. 
+        Returns True if the target amounts 
+        were all matched exactly.
+
+    """
+    # make sure `how` is a valid option
+    if how not in ['exact', 'left', 'right']:
+        raise ValueError("`how` must be 'exact', 'left', or 'right'")
+
+    # work off segments as a list
+    if not isinstance(segment_col, list):
+        segment_col = [segment_col]
+
+    # retain the original schema
+    df_cols = df.collect_schema().names()
+
+    # track the remaining amount needed
+    remaining = amounts.select(
+        pl.col(amount_col).alias('__remaining'),
+        *segment_col
+    )
+
+    # move through the rows until we match the total
+    curr_df = df
+    to_concat = []
+    done = False
+
+    while True:
+        # available records
+        curr_df = (
+            curr_df
+            .select(df_cols)
+            .join(remaining, on=segment_col, how='left')
+            .filter(pl.col(accounting_col) <= pl.col('__remaining'))
+            .with_columns(
+                __cs=pl.col(accounting_col).cum_sum().over(segment_col)
+            )
+        )
+
+        # if match option is left
+        # ...simply return rows where the end of the cumulative value
+        # ...is less than or equal to the target
+        if how == 'left':
+            return (
+                curr_df
+                .filter(pl.col('__cs') <= pl.col('__remaining'))
+                .select(df_cols)
+            )
+
+        # if match option is right
+        # ...return return rows where the start of the cumulative value
+        # ...is less than or equal to the target
+        if how == 'right':
+            choices = (
+                curr_df
+                .with_columns(
+                    __cs_start=pl.col('__cs') - pl.col(accounting_col)
+                )
+                .filter(pl.col('__cs_start') <= pl.col('__remaining'))
+            )
+            if chosen_amount_col is None:
+                return choices.select(df_cols)
+            else:
+                if chosen_amount_col not in df_cols:
+                    df_cols.append(chosen_amount_col)
+                return (
+                    choices
+                    .with_columns(
+                        pl.when(pl.col('__cs') <= pl.col('__remaining'))
+                            .then(pl.col(accounting_col))
+                            .otherwise(pl.col(accounting_col) + (pl.col('__remaining') - pl.col('__cs')))
+                            .alias(chosen_amount_col),
+                    )
+                    .select(df_cols)
+                )
+
+        # match option is exact
+        # ...iterate until all totals are matched
+        # ...records w/ cumulative sum below the target amounts
+        curr_sample = curr_df.filter(pl.col('__cs') <= pl.col('__remaining'))
+        
+        # if this happens then we can't match the desired amount(s) exactly
+        # ...we've exhausted the list
+        if is_empty(curr_sample):
+            break
+        
+        # add to the results
+        to_concat.append(curr_sample)
+
+        # update remaining amounts
+        remaining = (
+            remaining
+            .join(
+                    curr_sample
+                    .group_by(segment_col)
+                    .agg(pl.col(accounting_col).sum().alias('__sampled_amount')
+                ),
+                on=segment_col, 
+                how='left'
+            )
+            .fill_null(0)
+            .select(
+                (pl.col('__remaining') - pl.col('__sampled_amount')).alias('__remaining'),
+                *segment_col
+            )
+            .filter(pl.col('__remaining') > 0)
+        )
+
+        # are we done yet? if so, bail
+        if is_empty(remaining):
+            done = True
+            break
+
+        # update the pool of availble rows
+        curr_df = curr_df.filter(pl.col('__cs') > pl.col('__remaining'))
+
+    # return the compiled rows as well as the status
+    final =  (
+        pl.concat(to_concat, how='vertical_relaxed')
+        .select(df_cols)
+    )
+    return final, done
+
+
+def segmented_sampling_with_accounting_with_replace(
         df: pl.LazyFrame, 
         amounts: pl.LazyFrame,
         accounting_col: str,
@@ -551,10 +753,47 @@ def segmented_sampling_with_accounting_replace(
     )
 
 
-def segmented_sampling_with_accounting_no_replace():
+def segmented_sampling_with_accounting_no_replace(
+        df: pl.LazyFrame, 
+        amounts: pl.LazyFrame,
+        accounting_col: str,
+        amount_col: str,
+        segment_col: str | list[str], 
+        weights_col:str=None) -> pl.LazyFrame:
     """
-    TODO...
+    Performs segmented sampling while matching
+    prescribed accounting totals. Sample use case
+    is sampling households while controls are
+    prescribed as population.
 
+    **WITHOUT REPLACEMENT**
+
+    Parameters:
+    -----------
+    df: pl.LazyFrame
+        Data frame to sample from.
+    amounts: pl.LazyFrame
+        Data frame containing segments and amount/counts
+        i.e control totals.
+    accounting_col: str
+        Name of the column in sampling frame containing
+        amounts, e.g. persons.
+    counts_col: str
+        Column in the amounts data frame containing
+        the amounts to match.
+    segment_col: str or list of str
+        Column(s) containing the segmentation. These
+        columns must exist in both data frames and 
+        the combination of column values should be unique.
+    weights_col: str, optional, default None
+        If provided, column to serve as weights. 
+    max_iter: int, optional, default 100
+        Maximum number of sampling iterations. 
+    debug: bool, optional, default False
+        If True, prints a message of the whether or
+        not all amounts were matched exactly and the 
+        number of iterations it took. 
+        
     """
     pass
 
