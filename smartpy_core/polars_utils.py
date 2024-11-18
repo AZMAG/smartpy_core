@@ -265,7 +265,8 @@ def segmented_sample(
         counts_col: str,
         segment_col: str | list[str], 
         replace: bool,
-        weights_col: str=None) -> pl.LazyFrame | pl.DataFrame:
+        weights_col: str=None,
+        accounting_col: str=None) -> pl.LazyFrame | pl.DataFrame:
     """
     Segmented sampling.
 
@@ -294,14 +295,24 @@ def segmented_sample(
     pl.LazyFrame or pl.DataFrame
 
     """
-    if replace:
-        return segmented_sample_with_replace(
-            df, counts, counts_col, segment_col, weights_col
+    if accounting_col is None:
+        if replace:
+            return segmented_sample_with_replace(
+                df, counts, counts_col, segment_col, weights_col
+            )
+        else:
+            return segmented_sample_no_replace(
+                df, counts, counts_col, segment_col, weights_col
         )
     else:
-        return segmented_sample_no_replace(
-            df, counts, counts_col, segment_col, weights_col
-        )
+        if replace:
+            return segmented_sample_with_accounting_with_replace(
+                df, counts, accounting_col, counts_col, segment_col, weights_col
+            )
+        else:
+            return segmented_sample_with_accounting_no_replace(
+                df, counts, accounting_col, counts_col, segment_col, weights_col
+            )
 
 
 def segmented_sample_no_replace(
@@ -601,7 +612,7 @@ def segmented_cum_choose(
     return final, done
 
 
-def segmented_sampling_with_accounting_with_replace(
+def segmented_sample_with_accounting_with_replace(
         df: pl.LazyFrame, 
         amounts: pl.LazyFrame,
         accounting_col: str,
@@ -644,7 +655,11 @@ def segmented_sampling_with_accounting_with_replace(
         not all amounts were matched exactly and the 
         number of iterations it took. 
         
-    """
+    """    
+    # work off segments as a list
+    if not isinstance(segment_col, list):
+        segment_col = [segment_col]
+
     done = False
     pct_over = 1.0
     pct_over_increment = 0.05
@@ -711,7 +726,7 @@ def segmented_sampling_with_accounting_with_replace(
     return result
 
 
-def segmented_sampling_with_accounting_no_replace(
+def segmented_sample_with_accounting_no_replace(
         df: pl.LazyFrame, 
         amounts: pl.LazyFrame,
         accounting_col: str,
@@ -816,61 +831,173 @@ def transition_agents(targets,
                       target_col,
                       segment_cols,
                       agents, 
-                      agent_id_col) -> pl.LazyFrame | pl.DataFrame:
+                      agent_id_col,
+                      accounting_col: str=None,
+                      keep_outside: bool=False,
+                      linked_tables=None) -> pl.LazyFrame | pl.DataFrame:
     """
-    In progress.
+    Transitions a dataframe of agents to match the provided control totals.
 
-    Simple transtion model, so far doesn't handle accounting column
-    or linked tables. 
+    Parameters:
+    -----------
+    targets: polars.DataFrame
+        Table containing targets/control totals.
+    target_col: str
+        Column name in the frame containing the targets.
+    segment_cols: str or list<str>
+        Column(s) providing the segmentation, must exist
+        in both targets and agents tables.
+    agents: polars.DataFrame
+        Table containing agents.
+    agent_id_col: str
+        Column name in agents table serving as primary key
+        or index. Should be unique.
+    accounting_col: str, optional default None
+        If None, targets will match based on row counts.
+        If provided, targets will match based on the columns sums.
+    keep_outside: bool, optional, default False
+        If True, agents falling outside the target segmentation will 
+        be retain. Otherwise, only agents mathcing the segmentation
+        will be reatained.
+    linked_tables: dict of tuples
+        Specifies tables that will be linked to the core transitioned
+        agents. For example, persons linked to households.
+        Key is a descripton of the table, e.g. persons.
+        Value is a tuple of three items: (0) the data frame,
+        (1) foreign key column linking to the core agents, e.g.
+        'household_id', (2) primary key column, e.g. 'person_id'.
 
-    So suitable for emp but not hh pop.
-
-    Also doesn't do the sampling threhold hierarchy stuff
-    but we don't really use that.
-
-    Also, what do we do with agents that fall outside the segmentation scheme in
-    the controls
-    ...by default in urbansim these are removed
-    ...right now this would be keeping them
-
+        
+    Returns:
+    --------
+    Tuple in the form:
+    transitioned agents: polars.DataFrame
+        Resulting transitioned agents.
+    added ID mapping: polars.DataFrame
+        Contains the IDs of the rows that have been added
+        along w/ the ID of the source sample. None if
+        no agents added. 
+    removed IDs: polars.DataFrame
+        IDs of the rows that were removed. None if no
+        agents removed.
+    linked_table: dict <polars.DataFrame>
+        Resulting linked tables.
+    
     """
-    # starting ID for adding new agents
-    starting_id = get_starting_id(agents, agent_id_col)
-
+    
     # determine the amounts we need to add/remove
-    amounts = (
-        targets
-        .join(
-            agents.group_by(segment_cols).agg(__cnt=pl.len()),
-            on=segment_cols,
-            how='left',
+    if accounting_col is None:
+        amounts = (
+            targets
+            .join(
+                agents.group_by(segment_cols).agg(__cnt=pl.len()),
+                on=segment_cols,
+                how='left',
+            )
+            .with_columns(__diff=pl.col(target_col) - pl.col('__cnt'))
         )
-        .with_columns(__diff=pl.col(target_col) - pl.col('__cnt'))
-    )
+    else:
+        amounts = (
+            targets
+            .join(
+                agents.group_by(segment_cols).agg(__cnt=pl.col(accounting_col).sum()),
+                on=segment_cols,
+                how='left',
+            )
+            .with_columns(__diff=pl.col(target_col) - pl.col('__cnt'))
+        )
+
+    # retain a copy of the original source id
+    # ...this will be the original column name prefixed with '__src_'
+    agent_schema = agents.collect_schema()
+    agent_cols = agent_schema.names()
+    agent_id_col_dtype = agent_schema[agent_id_col]
+    src_col = '__src_{}'.format(agent_id_col)
+    agents = agents.with_columns(pl.col(agent_id_col).alias(src_col))
 
     # add agents where the controls are lower than the existing count
     adds = amounts.filter(pl.col('__diff') > 0)
-    added_agents = (
-        segmented_sample(
-            agents, adds, '__diff', segment_cols,True
-        )
-        .rename({agent_id_col: 'src_{}'.format(agent_id_col)})
-        .with_row_index(agent_id_col, starting_id)
-    )
+    added_agents = None
+    added_id_map = None
     
+    if not is_empty(adds):
+        # sample agents to add
+        starting_id = get_starting_id(agents, agent_id_col)
+        added_agents = (
+            segmented_sample(
+                agents, adds, '__diff', segment_cols,True, accounting_col=accounting_col
+            )
+            .select(pl.exclude(agent_id_col))
+            .with_row_index(agent_id_col, starting_id)
+            .with_columns(
+                pl.col(agent_id_col).cast(agent_id_col_dtype).alias(agent_id_col)
+            )
+        )
+        added_id_map = added_agents.select(src_col, agent_id_col)
+
     # remove agents where the controls are higher than the existing count
     removals = (
         amounts
         .filter(pl.col('__diff') < 0)
         .with_columns(__diff=pl.col('__diff').abs())
     )
-    removed_agents = segmented_sample(agents, removals, '__diff', segment_cols, False)
+    removed_agents = None
+    removed_ids = None
 
-    # combine
-    return pl.concat(
-        [
-            agents.join(removed_agents, on=agent_id_col, how='anti'),
-            added_agents.select(agents.columns)
-        ],
-        how='vertical_relaxed'
-    )
+    if not is_empty(removals):
+        removed_agents = segmented_sample(
+            agents, removals, '__diff', segment_cols, False, accounting_col=accounting_col)
+        removed_ids = removed_agents.select(agent_id_col)
+
+    # combine everything
+    if keep_outside:
+        # include agents not covered by the segmentation
+        final_df = agents
+    else:
+        # remove agents not covered by the segmentation
+        final_df = agents.join(amounts.select(segment_cols), on=segment_cols)
+
+    # for linked tables
+    link_results = {k: v[0] for k, v in linked_tables.items()}
+
+    # remove agents as necessary
+    if removed_agents is not None:
+        final_df = final_df.join(removed_agents, on=agent_id_col, how='anti')
+        link_results = {k: v[0].join(final_df.select(pl.col(agent_id_col))) for k, v in link_results.items()}
+
+    # add agents as necessary
+    if added_agents is not None:
+        # append addded agents
+        final_df = pl.concat(
+            [final_df, added_agents],
+            how='vertical_relaxed'
+        )
+
+        # append linked tables
+        def add_linked(link_key, link_df):
+            link_tup = linked_tables[link_key]
+            link_fk = link_tup[1]
+            link_pk = link_tup[2]
+            link_start_id = get_starting_id(link_df, link_pk)
+            link_schema = link_df.collect_schema()
+            link_cols = link_schema.names()
+
+            link_a = (
+                link_df
+                .join(
+                    added_id_map.select(src_col, pl.col(agent_id_col).alias('__new_id')),
+                    left_on=link_fk,
+                    right_on=src_col
+                )
+                .select(
+                    pl.col('__new_id').alias(link_fk),
+                    pl.exclude(link_pk, link_fk)
+                )
+                .with_row_index(link_pk, link_start_id)
+                .select(link_cols)
+            )
+            return pl.concat([link_df, link_a], how='vertical_relaxed')
+        link_results = {k: add_linked(k, v) for k, v in link_results.items()}
+
+    return final_df.select(agent_cols), added_id_map, removed_ids, link_results
+        
