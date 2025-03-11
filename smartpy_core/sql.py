@@ -237,3 +237,167 @@ def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists
         chunksize=chunksize,
         dtype=out_types,
     )
+
+import json
+
+def pandas_to_sql_new(df, server, db, db_table, index=True, index_label=None, if_exists='fail', chunksize=50000, dtypes=None, schema=None):
+    """
+    Writes data from a pandas.DataFrame to sql server table using mssql_insert_json() method to improve performance.
+
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        Data to write out.
+    server: str
+        Name of sql server instance.
+    db:
+        Name of the sql server database.
+    table: str
+        Name of the output table.
+    index: bool, default True
+        Whether or not to write out the index.
+    index_label: str, default None
+        Name to apply to index. If not provided, index names will be used.
+    if_exists: str, {'fail', 'replace', 'append'}, default 'append'
+        What to do if the table already exists.
+        - fail: Raise a ValueError.
+        - replace: Drop the table before inserting new values.
+        - append: Insert new values to the existing table.
+    chunksize: int, default 50000
+        Number of rows to insert at a given time.
+    dtypes: dict, optional, default None
+        Data types to override. Keys are column names, values are
+        sql alchemy data types.
+        see: https://docs.sqlalchemy.org/en/13/core/type_basics.html
+
+    """
+
+    db_para = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
+    conn_string = quote_plus(db_para)
+    engine = sqlalchemy.create_engine(
+    'mssql+pyodbc:///?odbc_connect={}'.format(conn_string))
+
+    # infer sql data types, respect any user provided dtypes
+    if dtypes is not None:
+        out_types = dtypes.copy()
+    else:
+        out_types = {}
+
+    def get_int_fld_type(col):
+        """
+        Determines the sql int type based on the series value range.
+
+        """
+        min_val = df[col].min()
+        max_val = df[col].max()
+
+        if min_val >= -32767 and max_val <= 32767:
+            return sqlalchemy.SMALLINT()
+        elif min_val >= -2147483647 and max_val <= 2147483647:
+            return sqlalchemy.INT()
+        else:
+            return sqlalchemy.BIGINT()
+
+    # loop through the columns and assign types
+    for col in df.columns:
+        if col in out_types:
+            continue
+
+        curr_dtype = str(df[col].dtype)
+
+        if curr_dtype == 'object':
+            # for str cols figure out the max characters needed
+            max_chars = df[col].str.len().max()
+            out_types[col] = sqlalchemy.VARCHAR(int(max_chars))
+
+        elif curr_dtype.startswith('float'):
+            # check for cases where everything implies an int (no decimal values)
+            # this typically occurs when the data is int but nulls are present
+            # if (df[col].fillna(0) % 1 == 0).all():
+            #     out_types[col] = get_int_fld_type(col)
+
+            # For some reason the column with null values is still treated as nvarchar and can not be converted to INT/SMALLINT
+            # when insert into sql server. So, keep them as float for now.
+            # if (df[col].fillna(0) % 1 == 0).all():
+            #     df[col] = fix_str_col(df[col])
+            #     df[col] = df[col].astype(float)
+            #     out_types[col] = get_int_fld_type(col)
+
+            out_types[col] = sqlalchemy.Float()
+
+        elif curr_dtype.startswith('int'):
+            out_types[col] = get_int_fld_type(col)    
+
+
+    def mssql_insert_json(table, conn, keys, data_iter):
+    
+        """
+        Execute SQL statement inserting data via OPENJSON
+        Parameters, this is the key to run to_sql() faster
+        https://gist.github.com/gordthompson/1fb0f1c3f5edbf6192e596de8350f205
+        ----------
+        table : pandas.io.sql.SQLTable
+        conn : sqlalchemy.engine.Engine or sqlalchemy.engine.Connection
+        keys : list of str
+            Column names
+        data_iter : Iterable that iterates the values to be inserted
+        """
+        # build dict of {"column_name": "column_type"}
+
+        # column data type is already defined above, so don't need to do this again, just bring it in below
+        # col_dict = {
+        #     str(col.name): "nvarchar(max)"
+        #     if str(col.type) in ["TEXT", "NTEXT"]
+        #     else "bit"
+        #     if str(col.type) == "BOOLEAN"
+        #     else "datetime2"
+        #     if str(col.type) == "DATETIME"
+        #     else str(col.type)
+        #     for col in table.table.columns
+        # }
+
+        # print(list(data_iter))
+
+        col_dict = out_types
+
+
+        columns = ", ".join([f"[{k}]" for k in keys])
+        if table.schema:
+            table_name = f"[{table.schema}].[{table.name}]"
+        else:
+            table_name = f"[{table.name}]"
+
+        json_data = [dict(zip(keys, row)) for row in data_iter]
+
+        with_clause = ",\n".join(
+            [
+                f"[{col_name}] {col_type} '$.\"{col_name}\"'"
+                for col_name, col_type in col_dict.items()
+            ]
+        )
+        placeholder = "?" if conn.dialect.paramstyle == "qmark" else "%s"
+        sql = f"""\
+        INSERT INTO {table_name} ({columns})
+        SELECT {columns}
+        FROM OPENJSON({placeholder})
+        WITH
+        (
+        {with_clause}
+        );
+        """
+
+        conn.exec_driver_sql(sql, (json.dumps(json_data, default=str),))
+
+    # write the data to sql
+    df.to_sql(
+    db_table,
+    engine,
+    index=index,
+    index_label=index_label,
+    if_exists=if_exists,
+    chunksize=chunksize,
+    dtype=out_types,
+    method=mssql_insert_json,
+    )
+
+    engine.dispose()
