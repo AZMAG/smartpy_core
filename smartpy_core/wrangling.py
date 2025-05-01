@@ -19,6 +19,26 @@ except ImportError:
     from inspect import getargspec
 
 
+def write_parquet_tables(folder, items):
+    """
+    Shorthand for writing a collection of data frames
+    to parquet tables.
+
+    Parameters:
+    -----------
+    folder: str
+        Full path of the folder to write to. Assumes the 
+        folder already exists.
+    items: dict[str: pd.DataFrame]
+        Dictionary of dataframes to write out, 
+        keys are ouptut names (exclude the .parquet suffix),
+        values are data frames.
+
+    """
+    for name, df in items.items():
+        df.to_parquet('{}//{}.parquet'.format(folder, name))
+
+
 def remote_csv_to_pandas(zip_url, csv_name, *args, **kwargs):
     """
     Reads a csv into a pandas data frame via http for
