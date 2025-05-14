@@ -527,9 +527,9 @@ def get_2d_pivot(df, rows_col, cols_col, prefix='', suffix='', sum_col=None, agg
         group_cols = rows_col + [cols_col]
 
     if sum_col is None:
-        piv = df.groupby(group_cols).size().unstack().fillna(0)
+        piv = df.groupby(group_cols, observed=False).size().unstack().fillna(0)
     else:
-        piv = df.groupby(group_cols)[sum_col].agg(agg_f).unstack().fillna(0)
+        piv = df.groupby(group_cols, observed=False)[sum_col].agg(agg_f).unstack().fillna(0)
 
     rename_columns(piv, prefix, suffix)
 
@@ -587,6 +587,21 @@ def tupelize(df, row_name=None, col_name='col', val_name='val'):
     3   | b    | use2 | 300
 
     """
+    if row_name is None:
+        row_name = df.index.names
+    else:
+        if not isinstance(row_name, list):
+            row_name = [row_name]
+        if len(row_name) != len(df.index.names):
+            raise ValueError('# of provided row names must match number of index levels')
+
+    # new implemention will keep dtype if all the same
+    stacked = df.stack().to_frame(val_name)
+    stacked.index.names = row_name + [col_name]
+    return stacked.reset_index()
+
+
+    # old implementation below just in case
     to_stack = []
     col_names = []
     num_cols = len(df.columns)
@@ -1088,6 +1103,10 @@ def categorize(series, breaks, labels=None, break_adj=0):
         s_min = series.min()
         if s_min < breaks[1]:
             breaks[0] = s_min
+
+    # handle undefined upper breaks
+    if np.isnan(breaks[-1]):
+        breaks[-1] = series.max() + 1
 
     # if no labels are provided, use all but the last break value
     if labels is None:
