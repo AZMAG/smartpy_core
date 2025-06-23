@@ -37,7 +37,8 @@ def get_engine(server, db):
     """
     key = (server, db)
     if key not in _engines:
-        db_para = 'DRIVER={SQL SERVER};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
+        # db_para = 'DRIVER={SQL SERVER};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
+        db_para = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
         conn_string = quote_plus(db_para)
         _engines[key] = sqlalchemy.create_engine('mssql+pyodbc:///?odbc_connect={}'.format(conn_string))
     return _engines[key]
