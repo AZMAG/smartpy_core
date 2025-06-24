@@ -93,7 +93,7 @@ def sql_execute(statements, server, db):
         statements = [statements]
     with engine.begin() as c:
         for s in statements:
-            c.execute(s)
+            c.execute(sqlalchemy.text(s))
 
 
 def get_records(query, server, db):
@@ -117,7 +117,7 @@ def get_records(query, server, db):
     """
     engine = get_engine(server, db)
     with engine.connect() as c:
-        return c.execute(query).mappings().all()
+        return c.execute(sqlalchemy.text(query)).mappings().all()
 
 
 def sql_to_pandas(query, server, db, index_fld=None):
