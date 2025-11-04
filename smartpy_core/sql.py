@@ -120,7 +120,7 @@ def get_records(query, server, db):
         return c.execute(sqlalchemy.text(query)).mappings().all()
 
 
-def sql_to_pandas(query, server, db, index_fld=None):
+def sql_to_pandas(query, server, db, index_fld=None, arrow=False):
     """
     Queries and loads data from a SQL Server table into a data frame.
 
@@ -134,6 +134,9 @@ def sql_to_pandas(query, server, db, index_fld=None):
         Name of the database.
     index_fld: string, optional, default None
         Name of field to populate the data frame index.
+    arrow: bool, optional, default False
+        If True, use pyarrow dtypes.
+        Otherwise, use pandas built-in types.
 
     Returns:
     --------
@@ -141,7 +144,10 @@ def sql_to_pandas(query, server, db, index_fld=None):
 
     """
     engine = get_engine(server, db)
-    return pd.read_sql(query, engine, index_fld)
+    if arrow:
+        return pd.read_sql(query, engine, index_fld, dtype_backend='pyarrow')
+    else:
+        return pd.read_sql(query, engine, index_fld)
 
 
 def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists='fail', chunksize=50000, dtypes=None):
@@ -402,3 +408,68 @@ def pandas_to_sql_new(df, server, db, db_table, index=True, index_label=None, if
     )
 
     engine.dispose()
+
+
+###################
+# POLARS
+###################
+
+
+_POLARS_INSTALLED = True
+try:
+    import polars as pl
+except:
+    _POLARS_INSTALLED = False
+
+
+def get_uri_conn_str(server: str, database: str) -> str:
+    """
+    Returns a sql server connectorx connection string for use with `pl.read_database_uri`.
+    ...Right now using ODBC Driver 17.
+    ...Assumes operating system authentication.
+    ...TODO move this into smartpy_core.sql
+
+    Parameters:
+    ----------
+    server: str
+        Name of the sql instance/server.
+    database: str
+        Name of the database.
+
+    Returns:
+    --------
+    str
+
+    """
+    return r'mssql://{}/{}?driver=ODBC+Driver+17+for+SQL+Server&trusted_connection=true'.format(server, database)
+
+
+def sql_to_polars(query, server, db, use_uri=True) :
+    """
+    Queries and loads data from a SQL Server table into a polars data frame.
+
+    Parameters:
+    -----------
+    query: string
+        SQL query to apply.
+    server: string
+        Name of the SQL Server instance.
+    db: string:
+        Name of the database.
+    use_uri: bool, optional, default True
+        If True, uses connectorx uri engine (faster).
+        If False, uses sql alchemy engine.
+        
+    Returns:
+    --------
+    polars.DataFrame
+    
+    """
+    if use_uri:
+        return pl.read_database_uri(
+            query,
+            get_uri_conn_str(server, db)
+        )
+    else:
+        engine = get_engine(server, db)
+        return pl.read_database(query, engine)
