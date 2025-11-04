@@ -465,6 +465,9 @@ def sql_to_polars(query, server, db, use_uri=True) :
     polars.DataFrame
     
     """
+    if not _POLARS_INSTALLED:
+        raise ImportError("Must have polars installed -- use: pip install polars")
+
     if use_uri:
         return pl.read_database_uri(
             query,
