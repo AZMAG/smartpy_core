@@ -37,10 +37,12 @@ def get_engine(server, db):
     """
     key = (server, db)
     if key not in _engines:
-        # db_para = 'DRIVER={SQL SERVER};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
         db_para = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
         conn_string = quote_plus(db_para)
-        _engines[key] = sqlalchemy.create_engine('mssql+pyodbc:///?odbc_connect={}'.format(conn_string))
+        _engines[key] = sqlalchemy.create_engine(
+            'mssql+pyodbc:///?odbc_connect={}'.format(conn_string),
+            fast_executemany=True
+        )
     return _engines[key]
 
 
@@ -182,15 +184,6 @@ def pandas_to_sql(df, server, db, table, index=True, index_label=None, if_exists
 
     """
     engine = get_engine(server, db)
-
-    @sqlalchemy.event.listens_for(engine, "before_cursor_execute")
-    def receive_before_cursor_execute(conn, cursor, statement, params, context, executemany):
-        """
-        The presence of this method allows faster inserts.
-
-        """
-        if executemany:
-            cursor.fast_executemany = True
 
     # infer sql data types, respect any user provided dtypes
     if dtypes is not None:
@@ -444,7 +437,7 @@ def get_uri_conn_str(server: str, database: str) -> str:
     return r'mssql://{}/{}?driver=ODBC+Driver+17+for+SQL+Server&trusted_connection=true'.format(server, database)
 
 
-def sql_to_polars(query, server, db, use_uri=True) :
+def sql_to_polars(query, server, db, use_uri=True):
     """
     Queries and loads data from a SQL Server table into a polars data frame.
 
@@ -476,3 +469,27 @@ def sql_to_polars(query, server, db, use_uri=True) :
     else:
         engine = get_engine(server, db)
         return pl.read_database(query, engine)
+
+
+def polars_to_sql(df, server, db, table):
+    """
+    Writes data from a polars.DataFrame to sql server table.
+
+    Parameters:
+    -----------
+    df: pandas.DataFrame
+        Data to write out.
+    server: str
+        Name of sql server instance.
+    db:
+        Name of the sql server database.
+    table: str
+        Name of the output table.
+    if_exists: str, {'fail', 'replace', 'append'}, default 'append'
+        What to do if the table already exists.
+        - fail: Raise a ValueError.
+        - replace: Drop the table before inserting new values.
+        - append: Insert new values to the existing table.
+    
+    """
+    
