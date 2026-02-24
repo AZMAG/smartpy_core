@@ -30,6 +30,51 @@ def is_empty(df: pl.DataFrame | pl.LazyFrame) -> bool:
         raise ValueError('df must be polars.DataFrame or polars.LazyFrame')
 
 
+def is_unique(df: pl.DataFrame, col: str | list[str]) -> bool:
+    """
+    Shorthand for determining if col(s) are unique.
+    
+    Parameters:
+    -----------
+    df: polars.DataFrame
+        Dataframe to check
+    col: str or list of str:
+        Column(s) to check. 
+
+    Returns:
+    --------
+    bool
+    
+    """
+    return df.select(col).is_unique().all()
+
+
+def dict_to_pl(d, key_col, val_col) -> pl.DataFrame:
+    """
+    Convert a simple dictionary containing single (non-list)
+    entries. This will create data frame with a column for the 
+    keys and a colum for the values.
+
+    Parameters:
+    ----------
+    d: dict
+        Dictionary containing values.
+    key_col: str
+        Column name for the keys.
+    val_col: str
+        Column name for the values.
+
+    Returns:
+    --------
+    polars.DataFrame
+
+    """
+    return pl.from_dict({
+        key_col: list(d.keys()),
+        val_col: list(d.values())
+    })
+
+
 #########################
 # funcs for map batches
 #########################
@@ -958,7 +1003,9 @@ def transition_agents(targets,
         final_df = agents.join(amounts.select(segment_cols), on=segment_cols)
 
     # for linked tables
-    link_results = {k: v[0] for k, v in linked_tables.items()}
+    link_results = {}
+    if linked_tables is not None:
+        link_results = {k: v[0] for k, v in linked_tables.items()}
 
     # remove agents as necessary
     if removed_agents is not None:
