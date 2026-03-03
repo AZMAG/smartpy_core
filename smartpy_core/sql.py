@@ -37,7 +37,18 @@ def get_engine(server, db):
     """
     key = (server, db)
     if key not in _engines:
-        db_para = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
+        # Starting from ODBC Driver 18 for SQL Server, there are some additional parameters needed to connect to the server, so we need to check the version of the driver installed.
+        import pyodbc
+        drivers = [d for d in pyodbc.drivers()]
+        for driver in drivers:
+            if "for SQL Server" in driver:
+                # Parse the version number from the driver name
+                version = int(driver.split("for SQL Server")[0].strip().split()[-1])
+                print(f" - {driver}")
+        if version >= 18:
+            db_para = 'DRIVER={ODBC Driver 18 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes;' + 'TrustServerCertificate=yes'
+        if version < 18:
+            db_para = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
         conn_string = quote_plus(db_para)
         _engines[key] = sqlalchemy.create_engine(
             'mssql+pyodbc:///?odbc_connect={}'.format(conn_string),
