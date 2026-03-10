@@ -283,7 +283,19 @@ def pandas_to_sql_new(df, server, db, db_table, index=True, index_label=None, if
 
     """
 
-    db_para = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
+    import pyodbc
+    drivers = [d for d in pyodbc.drivers()]
+    for driver in drivers:
+        if "for SQL Server" in driver:
+            # Parse the version number from the driver name
+            version = int(driver.split("for SQL Server")[0].strip().split()[-1])
+            print(f" - {driver}")
+    if version >= 18:
+        db_para = 'DRIVER={ODBC Driver 18 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes;' + 'TrustServerCertificate=yes'
+    if version < 18:
+        db_para = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
+
+    # db_para = 'DRIVER={ODBC Driver 17 for SQL Server};SERVER=' + server + ';DATABASE=' + db + ';Trusted_Connection=yes'
     conn_string = quote_plus(db_para)
     engine = sqlalchemy.create_engine(
     'mssql+pyodbc:///?odbc_connect={}'.format(conn_string))
