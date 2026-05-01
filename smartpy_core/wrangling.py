@@ -1106,7 +1106,15 @@ def categorize(series, breaks, labels=None, break_adj=0):
 
     # handle undefined upper breaks
     if np.isnan(breaks[-1]):
-        breaks[-1] = series.max() + 1
+        sm = series.max()
+        if sm >= breaks[-2]:
+            breaks[-1] = sm + 1
+        else:
+            # in the event the data max is less than 
+            # ...the provided breaks
+            breaks[-1] = breaks[-2] + 1
+
+    print(breaks)
 
     # if no labels are provided, use all but the last break value
     if labels is None:
