@@ -1114,8 +1114,6 @@ def categorize(series, breaks, labels=None, break_adj=0):
             # ...the provided breaks
             breaks[-1] = breaks[-2] + 1
 
-    print(breaks)
-
     # if no labels are provided, use all but the last break value
     if labels is None:
         labels = breaks[:-1]
